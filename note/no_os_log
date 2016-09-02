@@ -1,0 +1,2318 @@
+/*********************************** 2.leds_s_wtd ********************************************/
+ 
+start.s
+	mov r0, #0x100000
+	bl delay
+delay.c		//只有一个delay函数,没有其他标记项什么的
+void delay(int r0)
+{
+    volatile int count = r0;
+
+    while (count--)
+        ;
+}
+//汇编和c的混合编译,但诡异的是, 汇编bl delay  怎样把r0的数据递给了delay.c 作为c的参数?
+见解释:
+汇编调用 C 函数时,当参数个数不超过 4 个,使用 r0~r3 这 4 个寄存器来传递参数;如果参
+数个数超过 4 个,剩余的参数通过栈来传递,delay()只有 1 个参数,所以用 r0 来传递。另外,
+volatile 是为了避免编译器自动帮我们优化掉这段代码造成无法延时。
+
+
+/*********************************** 3.leds_c_sp ********************************************/
+
+//这里可以从dis里观察 sp 与 c 函数间如何互动
+这里把栈设在 IRAM 地址 d0037d80 开始 sp日后往 d0037d80- 方向 移动
+1. 栈的整体作用
+1) 保存现场;
+2) 传递参数:汇编代码调用 C 函数时,需传递参数;
+3) 保存临时变量:包括函数的非静态局部变量以及编译器自动生成的其他临时变量;
+
+
+/*********************************** 4.leds_c_icache ********************************************/
+
+比较常见的 cache (高速缓存) 包括 icache 和 dcache,
+icache 是 主存(包括,内存ram,nandflash,还有sd卡的flash空间) 与 cpu 中间 的高速缓存, 
+工作原理:
+当cpu读取 主存 的 指令来执行时,会把命令及命令的物理地址 存在 icache 里,执行下条命令时会从icache里先寻找,如果没有才到主存里找
+之所以也要把地址存到ichache 是因为指令执行需要先寻址!!,先从icache里寻址,没找到再到主存里寻址
+读写 icache 比读写 主存 速度更加快,所以开启 icache 功能 程序运行更快!!
+CP15 协处理器中的寄存器 1 的 bit[12]写 1 可以启动 icache , 写 0 可以停止 icache
+涉及到协处理的专门指令(详细阅s3c2410 的芯片手册或者《arm 体系结构与编程》),以下贴出开/关icache的协处理指令关键代码:
+#ifdef CONFIG_SYS_ICACHE_OFF
+bic r0, r0, #0x00001000
+@ clear bit 12 (I) I-cache
+#else
+orr r0, r0, #0x00001000
+@ set bit 12 (I) I-cache
+#endif
+mcr p15, 0, r0, c1, c0, 0  @ 协处理专门指令
+补充:
+dcache 与 mmu 相关 的高速缓存
+CP15 协处理器中的寄存器 1 的 bit[2]写 1 可以启动 dcache,写 0 可以停止 dcache
+
+
+/*********************************** 5.link_0x4000 ********************************************/
+
+重定位:就是,程序代码处于不正确的硬件地址位置,所以通过自身的copy程序,把自己重新拷到正确的位置
+这里与链接器ld有密切关系,
+所以联系bootloader_log 的 "通过bootloader1的Makefile 分析 编译 arm-linux-ld"与"通过bootloader1分析 汇编语言" 学习
+据link.lds,程序应当放到硬件地址 0xd0024000 处运行.但是启动时,程序据s5pv210的启动特性,在程序一开始先放到 0xd0020010 处运行,所以要重定位
+关键程序片段:
+start.s						
+	adr r0, _start  	 	@ _start当前所位于的地址：0xd0020010	
+	ldr r1, =_start 	   	@ _start的链接地址:0xd0024000
+	ldr r2, =bss_start		@ bss段的起始地址 (与重定位过程有关)
+	cmp r0, r1
+	beq clean_bss
+	
+copy_loop:
+	ldr r3, [r0], #4    // 源
+	str r3, [r1], #4	// 目的
+	cmp r1, r2
+	bne copy_loop
+程序片段为,先的得到 _start 的实际所处当前地址(利用相对寻址方式),和实际被推荐要放置的地址(即链接地址,利用绝对寻址方式), 
+cmp r0, r1 发现不一样, 然后跳到copyloop 执行把自身拷到正确的位置.
+bss段清0:
+注意,实际上编译链接出来的可执行文件只有文本段text的内容,并没有data段和bss段内容,
+而相应地,这两个段又以特殊方式记录在文本段text里,
+就是说文本段text里, 只记录了bss段的开始和结尾的地址,
+文本段text里 除了记录了data段的开始与结束的地址外,还记录了对应的变量的初始数据
+因此,bss段指向的那段空间,在芯片启动时是存在着随机数据的,如果遵循bss内容应该默认为0的原则,就必须对那段空间清0
+关键片段:
+start.s
+clean_bss:
+	ldr r0, =bss_start					
+	ldr r1, =bss_end
+	cmp r0, r1
+	beq run_on_dram
+	mov r2, #0
+link.lds:
+	bss_start = .; 
+	.bss : {
+		* (.bss)
+	}	
+	bss_end  = .;
+
+
+/*********************************** 6.sdram ********************************************/
+
+根据芯片说明书27个步骤初始话内存,有机会详述 
+代码见 memory.s
+简述主要步骤
+第一步
+设置 DRAM Driver Strength(内存访问信号的强度)
+DRAM Driver Strength 数值越大,则内存访问信号的强度也越大。内存对工作频率是比较敏感的,
+当工作频率高于内存的标称频率时,将该选项的数值调高,可以提高电脑在超频状态下的稳定性,
+在这里我们使用默认值即可。
+第二步
+凡是使用 DDR 类型的 DRAM,都需要使用 DLL(Delay Locked Loop 延时锁定回路提供一个数据滤波
+信号)技术,当数据有效时,存储控制器可使用这个数据滤波信号来精确定位数据。这里我们不
+用挖得太深,只需要按照上面的 27 个小步骤中步骤 2~4 来初始化 PHY DLL 就好。相关代码已经
+有详细的注释,这里不再粘贴代码。
+第三步
+初始化 DMC0 (DRAM memory controller 0)
+对应上面的 27 个小步骤中步骤 5~9,具体寄存器的设置请自行查看代码。
+第四步 初始化 DDR2 DRAM
+初始化 DRAM 只需要通过往寄存器 DIRECTCMD 写命令即可,需要写入什么命令可参考的 27 个小步骤中步骤 16~23。
+把sd卡内容存到DRAM0里
+注意 IRAM 96kb不完全作为RAM被访问修改,16kb后的空间被用作芯片其他硬件访问功能,比如IRAM最后128bytes就放着芯片自带固化的copy函数
+注意S5PV210_UM_REV1.1.pdf 里并没有关于 IRAM 分布情况 和 固化copy函数的内容!!! 在友善之臂的裸机学习里看到的
+这里使用固话在芯片里的copy函数 函数原型分析见下面函数:
+BL1/mmc_relocate.c:
+typedef unsigned int (*copy_sd_mmc_to_mem) (unsigned int  channel, unsigned int  start_block, unsigned char block_size, unsigned int  *trg, unsigned int  init);   //可以看到copy函数需要的参数 通道 开始扇区 要拷贝的扇区数 目标地址 是否需要初始化sd卡,0值表示不需要
+void copy_code_to_dram(void)
+{
+	unsigned long ch;	//判断通道
+	void (*BL2)(void);
+	ch = *(volatile unsigned int *)(0xD0037488);  //IRAM 16kb后空间,这地址自动由芯片更新,存放当前运行信息
+						      //比如,标记着是从sd卡启动,现在运行着BL1内容(即执行着来自IRAM前16kb地址里的内容)
+	copy_sd_sd_to_mem copy_bl2 = (copy_sd_sd_to_mem) (*(unsigned int *) (0xD0037F98));
+	unsigned int ret;
+	// 通道 0 芯片说明书说明,如果现在运行着BL1内容,且欲从sd/mmc/emmc里复制内容到DRAM,得使用copy函数的通道0
+	if (ch == 0xEB000000)
+	{
+	// 0:channel 0
+	// 49:源,代码位于扇区 49,1 sector = 512 bytes
+	// 32:长度,拷贝 32 sector,既 16K
+	// 0x23E00000:目的,链接地址 0x23E00000
+	ret = copy_bl2(0, 49, 32,(unsigned int *)0x23E00000, 0);
+	}
+	// 通道 2 如果现在是执行着在BL2(即执行着来自DRAM地址里的内容),且欲从sd/mmc/emmc里复制内容到DRAM,得使用copy函数的通道2
+	else if (ch == 0xEB200000)
+	{
+	ret = copy_bl2(2, 49, 32,(unsigned int *)0x23E00000, 0);
+	}
+	else
+	return;
+	// 跳转到 DRAM 中
+	BL2 = (void *)0x23E00000;
+	(*BL2)();
+}
+最后:关于bin 与 位置无关码 问题
+如果bin 全程指令流程使用相对寻址运行,不论,程序发哪都可以运行,这样就叫位置无关码,
+如果bin 当中如果有绝度寻址运行,那么程序需要放到推荐的硬件地址上才能正常工作 ,这样就不是位置无关码了.
+
+
+/*********************************** 10.clock.s 11.clock.c ********************************************/
+
+3大类时钟系 (domain)
+1) MSYS:用来给 cortex a8 处理器,dram 控制器,3D,IRAM,IROM,中断控制器等提供时钟;
+2) DSYS:用来给显示相关的部件提供时钟,包括 FIMC, FIMD, JPEG, and multimedia IPs;
+3) PSYS:用来给外围设备提供时钟,如 i2s, spi,i2c,uart 等
+外接的晶振频率(简称 Fin)为 24MHz,通过时钟控制逻辑 PLL 提高时钟频率
+S5PV210 共有 4 个倍频器(4个PLL)
+APLL(供 MSYS 使用),
+MPLL(供 DSYS 使用),
+EPLL(供 PSYS 使用),
+VPLL(供 video 相关的时钟使用)
+最终使用的时钟频率算法:
+Clocks have the following relationship:
+MSYS clock domain
+− freq(ARMCLK) = freq(APLLCLK) / n, where n = 1 ~ 8
+− freq(HCLK_MSYS) = freq(ARMCLK) / n, where n = 1 ~ 8
+− freq(PCLK_MSYS) = freq(HCLK_MSYS) / n, where n = 1 ~ 8
+− freq(HCLK_IMEM) = freq(HCLK_MSYS) / 2
+DSYS clock domain
+freq(PCLK_DSYS) = freq(HCLK_DSYS) / n, where n = 1 ~ 8
+PSYS clock domain
+− freq(PCLK_PSYS) = freq(HCLK_PSYS) / n, where n = 1 ~ 8
+− freq(SCLK_ONENAND) = freq(HCLK_PSYS) / n, where n = 1 ~ 8
+− freq(SCLK_ONENANPSYS) = freq(SCLK_ONENAND) / 2
+Values for the high-performance operation:
+• freq(ARMCLK) = 800 MHz
+• freq(HCLK_MSYS) = 200 MHz
+• freq(HCLK_IMEM) = 100 MHz
+• freq(PCLK_MSYS) = 100 MHz
+• freq(HCLKSECSS) = 83 MHz
+• freq(HCLK_DSYS) = 166 MHz
+• freq(PCLK_DSYS) = 83 MHz
+• freq(HCLK_PSYS) = 133 MHz
+• freq(PCLK_PSYS) = 66 MHz
+• freq(SCLK_ONENAND) = 133 MHz, 166 MHz
+时钟源选择寄存器:
+register address	R/W	Description				Reset Value
+CLK_SRC0 0xE010_0200 	R/W 	Select clock source 0 (Main) 		0x0000_0000
+CLK_SRC1 0xE010_0204 	R/W 	Select clock source 1 (Multimedia) 	0x0000_0000
+CLK_SRC2 0xE010_0208 	R/W 	Select clock source 2 (Multimedia) 	0x0000_0000
+CLK_SRC3 0xE010_020C 	R/W 	Select clock source 3 (Multimedia) 	0x0000_0000
+CLK_SRC4 0xE010_0210	R/W 	Select clock source 4 (Connectivity) 	0x0000_0000
+CLK_SRC5 0xE010_0214 	R/W 	Select clock source 5 (Connectivity) 	0x0000_0000
+CLK_SRC6 0xE010_0218 	R/W 	Select clock source 6 (Audio) 		0x0000_0000
+其中 CLK_SRC0 系统时钟各大系的总体向选择,而其他则针对各种具体功能的时钟选择
+以CLK_SRC0为例:
+芯片系统要么选择FINALL要么选择FOUTxPLL见寄存器说明
+据p361图:
+FINALL倍频前的时钟,即外部24MHZ晶振
+FOUTxPLL 经过xALL倍频后输出的时钟
+MUD 时钟选择器都称为MUD
+MUXFLASH 选择器输出的时钟称 MOUT_FLASH
+MUX_PSYS 选择器输出的时钟称 MOUT_PSYS
+MUX_DSYS 选择器输出的时钟称 MOUT_DSYS
+MUX_MSYS 选择器输出的时钟称 MOUT_MSYS
+MUXVPLL 选择器输出的时钟称 SCLKVPLL
+MUXEPLL 选择器输出的时钟称 SCLKEPLL
+MUXMPLL 选择器输出的时钟称 SCLKMPLL
+MUXAPLL 选择器输出的时钟称 SCLKAPLL
+CLK_SRC0	Bit		Description					Initial State
+Reserved	[31:29]		Reserved					0x0
+ONENAND_SEL	[28]		Control MUXFLASH (0:HCLK_PSYS, 1:HCLK_DSYS)	0
+Reserved	[27:25]		Reserved					0x0
+MUX_PSYS_SEL	[24]		Control MUX_PSYS (0:SCLKMPLL, 1:SCLKA2M)	0
+Reserved	[23:21]		Reserved					0x0
+MUX_DSYS_SEL	[20]		Control MUX_DSYS (0:SCLKMPLL, 1:SCLKA2M)	0
+Reserved	[19:17]		Reserved					0x0
+MUX_MSYS_SEL	[16]		Control MUX_MSYS (0:SCLKAPLL, 1:SCLKMPLL)	0
+Reserved	[15:13]		Reserved					0x0
+VPLL_SEL	[12]		Control MUXVPLL (0: FINVPLL, 1:FOUTVPLL)	0	
+Reserved	[11:9]		Reserved					0x0
+EPLL_SEL	[8]		Control MUXEPLL (0:FINPLL, 1:FOUTEPLL)		0
+Reserved	[7:5]		Reserved					0x0
+MPLL_SEL	[4]		Control MUXMPLL (0:FINPLL, 1:FOUTMPLL)		0	
+Reserved	[3:1]		Reserved					0x0
+APLL_SEL	[0]		Control MUXAPLL (0:FINPLL, 1:FOUTAPLL)		0
+时钟倍频时到得到稳定时钟输出需要的持续时间 的寄存器,设置倍频过程需要的时间:
+(APLL_LOCK, R/W, Address = 0xE010_0000)
+(MPLL_LOCK, R/W, Address = 0xE010_0008)
+(EPLL_LOCK, R/W, Address = 0xE010_0010)
+(VPLL_LOCK, R/W, Address = 0xE010_0020)
+某PLL_LOCK		Bit		Description						Initial State
+Reserved 		[31:16] 	Reserved 						0x0000
+PLL_LOCKTIME 		[15:0] 		Required period to generate a stable clock output	0x0FFF
+					This count is based on PLL's source clock.
+					- FINPLL for APLL, MPLL, EPLL 
+分频寄存器
+CLK_DIV0 0xE010_0300 R/W Set clock divider ratio 0 (System Clocks) 0x0000_0000
+CLK_DIV1 0xE010_0304 R/W Set clock divider ratio 1 (Multimedia) 0x0000_0000
+CLK_DIV2 0xE010_0308 R/W Set clock divider ratio 2 (Multimedia) 0x0000_0000
+CLK_DIV3 0xE010_030C R/W Set clock divider ratio 3 (Multimedia) 0x0000_0000
+CLK_DIV4 0xE010_0310 R/W Set clock divider ratio 4 (Connectivity) 0x0000_0000
+CLK_DIV5 0xE010_0314 R/W Set clock divider ratio 5 (Connectivity) 0x0000_0000
+CLK_DIV6 0xE010_0318 R/W Set clock divider ratio 6 (Audio & Others) 0x0000_0000
+CLK_DIV7 0xE010_031C R/W Set clock divider ratio 7 (IEM_IEC) 0x0000_0000
+其中 CLK_DIV0 系统时钟各大系的总体向分频参数,而其他则针对各种具体功能的时钟分频参数
+以CLK_DIV0为例:
+其中PCLK_PSYS,HCLK_PSYS,PCLK_DSYS,HCLK_DSYS,PCLK_MSYS,HCLK_MSYS,SCLKA2M,ARMCLK都是实际要用的时钟.都经过分频得到.
+CLK_DIV0		Bit  		Description						Initial State
+Reserved		[31]		Reserved						0
+PCLK_PSYS_RATIO 	[30:28] 	DIVPCLKP clock divider ratio,				0x0
+					PCLK_PSYS = HCLK_PSYS / (PCLK_PSYS_RATIO + 1) 		
+HCLK_PSYS_RATIO 	[27:24] 	DIVHCLKP clock divider ratio,				0x0
+					HCLK_PSYS = MOUT_PSYS / (HCLK_PSYS_RATIO + 1) 
+Reserved		[23]		Reserved						0
+PCLK_DSYS_RATIO 	[22:20]		DIVPCLKD clock divider ratio,				0x0
+					PCLK_DSYS = HCLK_DSYS / (PCLK_DSYS_RATIO + 1) 
+HCLK_DSYS_RATIO 	[19:16] 	DIVHCLKD clock divider ratio,				0x0
+					HCLK_DSYS = MOUT_DSYS / (HCLK_DSYS_RATIO + 1) 
+Reserved		[15]		Reserved						0
+PCLK_MSYS_RATIO		[14:12]		DIVPCLKM clock divider ratio,				0x0
+					PCLK_MSYS = HCLK_MSYS / (PCLK_MSYS_RATIO + 1)
+Reserved		[11]		Reserved						0
+HCLK_MSYS_RATIO		[10:8]		DIVHCLKM clock divider ratio,				0x0
+					HCLK_MSYS = ARMCLK / (HCLK_MSYS_RATIO + 1)
+Reserved		[7]		Reserved						0
+A2M_RATIO		[6:4]		DIVA2M clock divider ratio,				0x0
+					SCLKA2M = SCLKAPLL / (A2M_RATIO + 1)
+Reserved		[3]		Reserved						0
+APLL_RATIO		[2:0]		DIVAPLL clock divider ratio,				0x0
+					ARMCLK = MOUT_MSYS / (APLL_RATIO + 1)
+倍频器控制寄存器APLL
+ALPP_CON0 负责设置 APLL,FINPLL=24MHz,经过 APLL 后,我们将输出 FOUT=1000Mhz 的时钟频率
+FOUT 的计算公式如下:FOUT=MDIV*FIN/(PDIV*2^(SDIV-1)) = 1000 MHz
+所以可以这样设:MDIV= 0x7d,PDIV= 0x3,SDIV=1
+APLL_CON0		Bit		Description						Initial State
+ENABLE 			[31] 		PLL enable control (0: disable, 1: enable) 		0
+Reserved 		[30] 		Reserved 						0
+LOCKED 			[29] 		PLL locking indication					0
+					0 = Unlocked
+					1 = Locked
+					Read Only 
+Reserved 		[28:26] 	Reserved 						0x0
+MDIV 			[25:16] 	PLL M divide value 					0xC8
+Reserved 		[15:14] 	Reserved 						0
+PDIV 			[13:8] 		PLL P divide value 					0x3
+Reserved 		[7:3] 		Reserved 						0
+SDIV 			[2:0] 		PLL S divide value					0x1
+倍频器控制寄存器APLL
+MPLL_CON 寄存器负责设置 MPLL,FINPLL=24MHz 经过 MPLL 后,我们将输出 FOUT=667Mhz 的时钟频率
+FOUT 的计算公式如下:FOUT=MDIV*FIN/(PDIV*2^SDIV) = 667 MHz
+所以可以这样设:MDIV=0x29B,PDIV= 0xC,SDIV=1
+3.7.2.2 PLL Control Registers (MPLL_CON, R/W, Address = 0xE010_0108)
+MPLL_CON		Bit		Description						Initial State
+ENABLE			[31] 		PLL enable control (0: disable, 1: enable) 		0
+Reserved 		[30] 		Reserved 						0
+LOCKED 			[29] 		PLL locking indication					0
+					0 = Unlocked
+					1 = Locked
+					Read Only 
+Reserved 		[28] 		Reserved						0
+VSEL 			[27] 		VCO frequency range selection 				0x0
+Reserved 		[26] 		Reserved						0
+MDIV 			[25:16] 	PLL M divide value					0x14D
+Reserved 		[15:14] 	Reserved						0
+PDIV 			[13:8] 		PLL P divide value					0x3
+Reserved 		[7:3] 		Reserved						0
+SDIV 			[2:0] 		PLL S divide value					0x1
+认识以上重要时钟设置内容后,简述时钟设置步骤:
+先CLK_SRC0选择使用外部时钟运行芯片
+设置倍频参数,
+设置倍频需要的lock时间,
+然后进行倍频,经过一段lock时间后倍频成功,时钟稳定,
+然后才选择倍频后时钟.选择后再对时钟分频,得到最终能使用的时钟.
+对应程序片段:
+void clock_init()
+{
+// 1 设置各种时钟开关,暂时不使用 PLL
+CLK_SRC0 = 0x0;
+// 2 设置锁定时间,使用默认值即可
+APLL_LOCK = 0x0000FFFF;
+MPLL_LOCK = 0x0000FFFF;
+// 3 设置分频 注意,先设置好分频参数,后面一旦倍频好了后,会自动根据设置分频
+CLK_DIV0 = 0x14131440;
+// 4 设置 PLL 往控制寄存器使能pll时,会根据设置开始倍频作业,直到持续整段locktime,时钟稳定,分频也做完,才能执行下条指令
+APLL_CON0 = APLL_VAL;//执行倍频APLL
+MPLL_CON = MPLL_VAL;//执行倍频MPLL(所以连续经历了两段倍频过程,两段过程分别进行,而非同时执行!!,)
+// 5 设置各种时钟开关,使用 PLL
+CLK_SRC0 = 0x10001111;
+}
+
+
+
+/*********************************** 12.uart_putchar ********************************************/
+12.uart_putchar
+#define GPA0CON 		( *((volatile unsigned long *)0xE0200000) )	//uart0,1,2 针扣设置	
+#define GPA1CON 		( *((volatile unsigned long *)0xE0200020) )	//uart3,针扣设置
+// UART相关寄存器(以uart0为例)
+#define ULCON0 			( *((volatile unsigned long *)0xE2900000) )	//红外线串口模式设置	
+#define UCON0 			( *((volatile unsigned long *)0xE2900004) )	//串口设置
+#define UFCON0 			( *((volatile unsigned long *)0xE2900008) )	
+	//串口的FIFO通道功能设置,可用可不用,每个串口都配有一条FIFO通道,
+#define UMCON0 			( *((volatile unsigned long *)0xE290000C) )     
+	//串口流控制功能设置,可用可不用.就是标准9针串口里其他的控制线的设置,重点是request to send(RTS)线结合auto flow control(AFC)功能设置, 
+#define UTRSTAT0 		( *((volatile unsigned long *)0xE2900010) )
+	//Tx Rx 的状态寄存器,
+#define UERSTAT0 		( *((volatile unsigned long *)0xE2900014) )
+	//RX错误时记录时的状态寄存器
+#define UFSTAT0 		( *((volatile unsigned long *)0xE2900018) )
+	//FIFO状态寄存器  
+#define UMSTAT0 		( *((volatile unsigned long *)0xE290001C) )
+	//流控制状态寄存器
+#define UTXH0 			( *((volatile unsigned long *)0xE2900020) )
+	//传输buffeer
+#define URXH0 			( *((volatile unsigned long *)0xE2900024) )
+	//接收buffer
+#define UBRDIV0 		( *((volatile unsigned long *)0xE2900028) )
+	//波特率设置寄存器 放置UBRDIV值
+#define UDIVSLOT0 		( *((volatile unsigned long *)0xE290002C) )
+	//波特率设置寄存器 放置UDIVSLOT值 
+波特率公式:
+	DIV_VAL = (PCLK / (bps x 16)) −1	//已知 PCLK,bps(波特率) 得出DIV_VAL 一般是个小数
+	DIV_VAL = UBRDIVn + (UDIVSLOT值转为进制值时,包含1的个数)/16 //已知DIV_VAL得出 UBRDIVn(整数) 和 UDIVSLOT 
+#define UINTP 			( *((volatile unsigned long *)0xE2900030) )
+	//(Tx Rx 错误 流控制功能) 的中断开关
+#define UINTSP 			( *((volatile unsigned long *)0xE2900034) )
+	//相当与flag,有中断时立flag,这里称中断源
+#define UINTM 			( *((volatile unsigned long *)0xE2900038) )
+	//屏蔽寄存器,比如屏蔽了某中断时,当这个中断促发立flag时,处理器忽略处理
+通过读 UTRSTAT0 发送/接收状态寄存器,当 Receive buffer data ready= 1 时说明接收到数据,读 URXH0 寄存器可以得到 8bit 的数据;
+当 Transmitter empty = 1 时说明可以发送数据,写 8bit 的数据到 UTXH0
+当然如果启用了FIFO也可以这样:
+// 接收一个字符 
+char getc(void)
+{
+	// 如果RX FIFO空，等待
+	while (!(UTRSTAT0 & (1<<0)));
+	// 取数据
+	return URXH0;                   	
+}
+
+// 发送一个字符
+void putc(char c)
+{
+	// 如果TX FIFO满，等待
+	while (!(UTRSTAT0 & (1<<2)));
+	// 写数据
+	UTXH0 = c;                      	
+}
+
+
+
+13.uart_stdio	
+关于移植printf与scanf 以及可变参数函数的讨论日后补充
+
+
+
+/*********************************** 14.nand ********************************************/
+
+未知是如何控制 ALE CLE WE RE!!!!!!!
+本例对应nandflash芯片是K9F4G08U0D,使用port有 
+I/O1~7 数据的输入输出
+CLE nandflash的命令传输使能标记针口 ,在标记期间,可以输入命令
+ALE nandflash的地址传输使能标记针口 ,在标记期间可以读出地址
+CE  nandflash片选针扣,顾名思义是,当针扣输入高电平时,表示被选择了
+RE  读芯片的标记针口,在针口低电平时才可以读数据
+WE  写芯片的标记针口,在针扣低电平时才可以写数据
+WP  写保护标记针口
+R/B 芯片工作状态输出针口,当输出0时,表示芯片忙碌,当输出1时(高电平),表示芯片空闲
+VCC 电源
+VSS 地线
+NC 不用连接
+芯片空间:
+#define MAX_NAND_BLOCK  			  8192 			//8192个block
+#define NAND_PAGE_SIZE  			  2048 			//每page含2048 bytes
+#define NAND_BLOCK_SIZE 			  64  			//每block含64 page
+#define NFCONF 			( *((volatile unsigned long *)0xB0E00000) )
+	//nandflash设置寄存器;MsgLength和ECCType0跟设置ECC有关,
+	//TACLS CLE和ALE信号持续时间,一般也指地址传输时的持续时间
+	//TWRPH0 命令传输时的持续时间
+	//TWRPH1 数据传输时的持续时间
+	//MLCFlash flash芯片结构类型类型相关设置,smart210的nandflash芯片是SLC结构
+	//PageSize 芯片的页大小,(也称扇区)
+	//AddrCycle 地址周期,由于pagesize大小为2kb,且nandflash空间大,所以,需要五个地址周期,地址周期从重点片段中体验
+#define NFCONT 			( *((volatile unsigned long *)0xB0E00004) )
+	//nandflash控制寄存器
+	//Reg_nCE0,1,2,3 片选信号控制,0,1,2,3表示可以接4块nandflash芯片,当要选择读写某芯片时,其对应的片选信号低电平,其他一律高电平
+	//MODE 是否使能 nandflash 控制器
+	//InitMECC/InitSECC/SECCLock/MECCLock,我们的裸机代码不涉及 ECC,这 4 个标志位随便设置即可
+	//RnB_TransMode = 0,Detect rising edge,RnB 是 NAND Flash 的状态探测引脚,我们使用上升沿触发
+	//EnbRnBINT = 0 ,禁止 RnB 中断;
+	//EnbIllegalAccINT = 0,禁止 Illegal access 中断 ;
+	//EnbMLCDecInt/EnbMLCEncInt 为 MCL 相关,不用设置;
+	//LOCK = 0,我们没有用到 Soft Lock,所以禁止 Soft Lock;
+	//LockTight = 0,我们没有用到 Lock-tight,所有禁止 Lock-tight;
+	//MLCEccDirection,MLC 相关,可不用设置
+#define NFCMMD 			( *((volatile unsigned long *)0xB0E00008) )
+	//写入nandflash 命令 的寄存器 (命令值参照nandflash芯片) 
+#define NFADDR 			( *((volatile unsigned long *)0xB0E0000C) )
+	//写入nandflash 地址 的寄存器, 只有8位, 32位地址显然要分4次写入,在让 nandflash 控制机构自己传输
+#define NFDATA 			( *((volatile unsigned long *)0xB0E00010) )
+	//写入nandflash 数据 的寄存器, 32位数据,
+#define NFSTAT 			( *((volatile unsigned long *)0xB0E00028) )
+	//状态寄存器
+#define MP0_1CON 		( *((volatile unsigned long *)0xE02002E0) )
+#define MP0_2CON 		( *((volatile unsigned long *)0xE0200300) )
+#define MP0_3CON 		( *((volatile unsigned long *)0xE0200320) )
+	//以上三组均为 I/O 口 设置寄存器,要设置对应的针口map
+芯片命令:
+#define NAND_CMD_READ_1st             0x00				
+#define NAND_CMD_READ_2st             0x30
+#define NAND_CMD_RANDOM_WRITE         0x85
+#define NAND_CMD_RANDOM_READ_1st      0x05
+#define NAND_CMD_RANDOM_READ_2st      0xe0
+#define NAND_CMD_READ_CB_1st          0x00
+#define NAND_CMD_READ_CB_2st          0x35
+#define NAND_CMD_READ_ID              0x90
+#define NAND_CMD_RES                  0xff
+#define NAND_CMD_WRITE_PAGE_1st       0x80
+#define NAND_CMD_WRITE_PAGE_2st       0x10
+#define NAND_CMD_BLOCK_ERASE_1st      0x60
+#define NAND_CMD_BLOCK_ERASE_2st      0xd0
+#define NAND_CMD_READ_STATUS          0x70
+重点片段:
+//设置时钟:nandflash使用hclk_psys=133MHZ,以下是div0的分频参数
+div0 = 	(0 << 0)  |	/* APLL_RATIO = 0, freq(ARMCLK) = MOUT_MSYS / (APLL_RATIO + 1) = 1000MHz */
+	(4 << 4)  |	/* A2M_RATIO = 4, freq(A2M) = SCLKAPLL / (A2M_RATIO + 1) = 200MHz */
+	(4 << 8)  |	/* HCLK_MSYS_RATIO = 4, freq(HCLK_MSYS) = ARMCLK / (HCLK_MSYS_RATIO + 1) = 200MHz */
+	(1 << 12) |	/* PCLK_MSYS_RATIO = 1, freq(PCLK_MSYS) = HCLK_MSYS / (PCLK_MSYS_RATIO + 1) = 100MHz */
+	(3 << 16) | /* HCLK_DSYS_RATIO = 3, freq(HCLK_DSYS) = MOUT_DSYS / (HCLK_DSYS_RATIO + 1) = 166MHz */
+	(1 << 20) | /* PCLK_DSYS_RATIO = 1, freq(PCLK_DSYS) = HCLK_DSYS / (PCLK_DSYS_RATIO + 1) = 83MHz */
+	(4 << 24) |	/* HCLK_PSYS_RATIO = 4, freq(HCLK_PSYS) = MOUT_PSYS / (HCLK_PSYS_RATIO + 1) = 133MHz */
+	(1 << 28);	/* PCLK_PSYS_RATIO = 1, freq(PCLK_PSYS) = HCLK_PSYS / (PCLK_PSYS_RATIO + 1) = 66MHz */
+//设置nandflash 
+	NFCONF = (TACLS<<12)|(TWRPH0<<8)|(TWRPH1<<4)|(0<<3)|(0<<2)|(1<<1)|(0<<0);
+	NFCONT = (0<<18)|(0<<17)|(0<<16)|(0<<10)|(0<<9)|(0<<8)|(0<<7)|(0<<6)|(0x3<<1)|(1<<0);
+//设置I/O map
+	MP0_1CON = 0x22333322;
+	MP0_2CON = 0x00002222;
+	MP0_3CON = 0x22222222;
+//reset
+	NFCONT &= ~(1<<1);  //发片选信号
+	for(i=0; i<10; i++); //等待片选信号稳定
+	NFCMMD = NAND_CMD_RES;	//写入reset命令
+	while( !(NFSTAT & (BUSY<<4)) )	//等待命令执行完成
+		for(i=0; i<10; i++);
+	NFCONT |= (1<<1);	//取消片选
+//读芯片厂商信息 (似乎不用拉 WE 针口信号,是不是在写入NFCMMD时,自动拉信号?)
+//事实上在给NFCMMD写入命令后,相关CLE ALE WE RE 的标记线,由s5pv210硬件自己操作????
+//s5pv210自己知道对应的命令需要怎么操作CLE ALE WE RE 吗???? 因为命令是nandflash芯片提供的
+	NFCONT &= ~(1<<1);  //发片选信号
+	for(i=0; i<10; i++); //等待片选信号稳定
+	NFCMMD = NAND_CMD_READ_ID;	//写入NAND_CMD_READ_ID命令
+	//5个周期地址传输 注意这里的发送的地址是nandflash芯片自己的地址,而不是nandflash芯片映射到s5pv210 address map 上的地址!!
+	//例如厂商信息固化在芯片0x00000000地址上
+	col = addr % NAND_PAGE_SIZE;	//得出地址所在page上的偏移地址	 			
+	row = addr / NAND_PAGE_SIZE;	//得出地址所在的page序号 
+	NFADDR = col & 0xff;		//1周期,传偏移地址前8位	
+	for(i=0; i<10; i++);		//等待 
+	NFADDR = (col >> 8) & 0x0f; 	//2周期,传偏移地址后5位	
+	for(i=0; i<10; i++);		//等待	
+	NFADDR = row & 0xff;		//3周期,传所在page的序号的前8位		
+	for(i=0; i<10; i++);		//等待	
+	NFADDR = (row >> 8) & 0xff;	//4周期,传所在page的序号的中8位
+	for(i=0; i<10; i++);		//等待
+	NFADDR = (row >> 16) & 0xff;	//5周期,传所在page的序号的后3位
+	for(i=0; i<10; i++);		//等待
+	while( !(NFSTAT & (BUSY<<4)) )	//等待命令执行完成
+		for(i=0; i<10; i++); 
+	//连续读出数据 (注意,在上面最后一个地址发送成功时,硬件会自动执行,并把一page数据拷到s5pv210的某缓存里)
+	//NFDATA 1字节1字节地从缓存里取出数据,当NFDATA并读出数据后,马上取出缓存下个数据到NFDATA
+	nand_id.IDm = 	NFDATA;		
+	nand_id.IDd = 	NFDATA;
+	nand_id.ID3rd = NFDATA;
+	nand_id.ID4th = NFDATA;
+	nand_id.ID5th = NFDATA;
+	NFCONT |= (1<<1);	//取消片选
+//擦除芯片某block
+	NFCONT &= ~(1<<1);  //发片选信号
+	for(i=0; i<10; i++); //等待片选信号稳定
+	NFCMMD = NAND_CMD_BLOCK_ERASE_1st;	//写入NAND_CMD_BLOCK_ERASE_1st命令 block erase 分两阶段指令
+	for(i=0; i<10; i++); 	//等待
+	row = block_num * NAND_BLOCK_SIZE //算出这block的起始page的序号
+	NFADDR = row & 0xff;		//1周期,传所在page的序号的前8位		
+	for(i=0; i<10; i++);		//等待	
+	NFADDR = (row >> 8) & 0xff;	//2周期,传所在page的序号的中8位
+	for(i=0; i<10; i++);		//等待
+	NFADDR = (row >> 16) & 0xff;	//3周期,传所在page的序号的后3位
+	NFSTAT = (NFSTAT)|(1<<4);	//清RnB探针
+	NFCMMD = NAND_CMD_BLOCK_ERASE_1st;	//写入NAND_CMD_BLOCK_ERASE_2st命令 
+	for(i=0; i<10; i++);	//等待
+	while( !(NFSTAT & (BUSY<<4)) )	//等待命令执行完成
+		for(i=0; i<10; i++); 
+	//查看状态  
+	nand_send_cmd(NAND_CMD_READ_STATUS);
+	NFCMMD = NAND_CMD_READ_STATUS;	//写入NAND_CMD_READ_STATUS命令 
+	for(i=0; i<10; i++); 	//等待
+	ch = NFDATA;	//读取状态信息
+	NFCONT |= (1<<1);	//取消片选
+//copy nandflash 到 DRAM  (对nandflash读操作)
+	unsigned char *sdram_addr, //DRAM 开始地址
+	unsigned long nand_addr,   //nand 开始地址
+	unsigned long length	   //数据长度
+	unsigned long i = 0;
+	NFCONT &= ~(1<<1);  //发片选信号
+	while(length)
+	{
+		NFCMMD = NAND_CMD_READ_1st;	//写入NAND_CMD_READ_1st命令 copy to DRAM 分两阶段指令
+		//5个周期地址传输 
+		col = addr % NAND_PAGE_SIZE;	//得出地址所在page上的偏移地址	 			
+		row = addr / NAND_PAGE_SIZE;	//得出地址所在的page序号 
+		NFADDR = col & 0xff;		//1周期,传偏移地址前8位	
+		for(i=0; i<10; i++);		//等待 
+		NFADDR = (col >> 8) & 0x0f; 	//2周期,传偏移地址后5位	
+		for(i=0; i<10; i++);		//等待	
+		NFADDR = row & 0xff;		//3周期,传所在page的序号的前8位		
+		for(i=0; i<10; i++);		//等待	
+		NFADDR = (row >> 8) & 0xff;	//4周期,传所在page的序号的中8位
+		for(i=0; i<10; i++);		//等待
+		NFADDR = (row >> 16) & 0xff;	//5周期,传所在page的序号的后3位
+		for(i=0; i<10; i++);		//等待
+		NFSTAT = (NFSTAT)|(1<<4);	//清RnB探针
+		NFCMMD = NAND_CMD_READ_2st;	//写入NAND_CMD_READ_2st命令 copy to DRAM 分两阶段指令
+		while( !(NFSTAT & (BUSY<<4)) )	//等待命令执行完成
+			for(i=0; i<10; i++); 
+		// 列地址,即页内地址
+		unsigned long col = nand_addr % NAND_PAGE_SIZE;
+		i = col;
+		// 读一页数据,每次拷 1byte,共拷 2048 次(2k),直到长度为 length 的数据拷贝完毕
+		for(; i<NAND_PAGE_SIZE && length!=0; i++,length--)
+		{
+			*sdram_addr = NFDATA;
+			sdram_addr++;
+			nand_addr++;
+		}
+	)
+	//查看状态  
+	nand_send_cmd(NAND_CMD_READ_STATUS);
+	NFCMMD = NAND_CMD_READ_STATUS;	//写入NAND_CMD_READ_STATUS命令 
+	for(i=0; i<10; i++); 	//等待
+	ch = NFDATA;	//读取状态信息
+	NFCONT |= (1<<1);	//取消片选
+//copy DRAM 到 nandflash  (对nandflash写操作)
+ 	unsigned char *sdram_addr, //DRAM 开始地址
+	unsigned long nand_addr,   //nand 开始地址
+	unsigned long length	   //数据长度
+	NFCONT &= ~(1<<1);  //发片选信号
+	while(length)
+	{
+		NFCMMD = NAND_CMD_READ_1st;	//写入NAND_CMD_READ_1st命令 copy to DRAM 分两阶段指令
+		//5个周期地址传输 
+		col = addr % NAND_PAGE_SIZE;	//得出地址所在page上的偏移地址	 			
+		row = addr / NAND_PAGE_SIZE;	//得出地址所在的page序号 
+		NFADDR = col & 0xff;		//1周期,传偏移地址前8位	
+		for(i=0; i<10; i++);		//等待 
+		NFADDR = (col >> 8) & 0x0f; 	//2周期,传偏移地址后5位	
+		for(i=0; i<10; i++);		//等待	
+		NFADDR = row & 0xff;		//3周期,传所在page的序号的前8位		
+		for(i=0; i<10; i++);		//等待	
+		NFADDR = (row >> 8) & 0xff;	//4周期,传所在page的序号的中8位
+		for(i=0; i<10; i++);		//等待
+		NFADDR = (row >> 16) & 0xff;	//5周期,传所在page的序号的后3位
+		for(i=0; i<10; i++);		//等待
+		// 列地址,即页内地址
+		unsigned long col = nand_addr % NAND_PAGE_SIZE;
+		i = col;
+		// 写一页数据,每次拷 1byte,共拷 2048 次(2k),直到长度为 length 的数据拷贝完毕 
+		for(; i<NAND_PAGE_SIZE && length!=0; i++,length--)
+		{
+			NFDATA = *sdram_addr;   //给1字节1字节地NFDATA写数据,NFDATA会把写入的字节以FIFO方式放入缓存
+			sdram_addr++;		//累计写入缓存2kb后,后面执行写命令刷入nandflash
+			nand_addr++;
+		}
+		NFSTAT = (NFSTAT)|(1<<4);	//清RnB探针
+		NFCMMD = NAND_CMD_WRITE_PAGE_2st;	//写入NAND_CMD_WRITE_PAGE_2st命令 copy to DRAM 分两阶段指令
+		while( !(NFSTAT & (BUSY<<4)) )	//等待命令执行完成
+			for(i=0; i<10; i++); 
+	}
+	//查看状态  
+	nand_send_cmd(NAND_CMD_READ_STATUS);
+	NFCMMD = NAND_CMD_READ_STATUS;	//写入NAND_CMD_READ_STATUS命令 
+	for(i=0; i<10; i++); 	//等待
+	ch = NFDATA;	//读取状态信息
+	NFCONT |= (1<<1);	//取消片选
+
+
+/*********************************** 14_1.nand_ecc ********************************************/
+#include "types.h"
+
+#define MP0_1CON  		(*(volatile u32 *)0xE02002E0)
+#define	MP0_3CON  		(*(volatile u32 *)0xE0200320)
+#define	MP0_6CON 		(*(volatile u32 *)0xE0200380)
+
+#define	NFCONF  		(*(volatile u32 *)0xB0E00000) 
+#define	NFCONT  		(*(volatile u32 *)0xB0E00004) 	
+#define	NFCMMD  		(*(volatile u32 *)0xB0E00008) 
+#define	NFADDR  		(*(volatile u32 *)0xB0E0000C)
+#define	NFDATA  		(*(volatile u8 *)0xB0E00010)
+#define	NFSTAT  		(*(volatile u32 *)0xB0E00028)
+
+#define	NFMECCD0  		(*(volatile u32 *)0xB0E00014)
+#define	NFMECCD1  		(*(volatile u32 *)0xB0E00018)
+#define	NFECCPRGECC0 	(*(volatile u32 *)0xB0E20090)
+#define	NFECCPRGECC1 	(*(volatile u32 *)0xB0E20094)
+#define	NFECCPRGECC2 	(*(volatile u32 *)0xB0E20098)
+#define	NFECCPRGECC3 	(*(volatile u32 *)0xB0E2009C)
+#define	NFECCCONF  		(*(volatile u32 *)0xB0E20000)
+#define	NFECCCONT  		(*(volatile u32 *)0xB0E20020)
+#define	NFECCSTAT  		(*(volatile u32 *)0xB0E20030)
+
+#define NFECCSECSTAT	(*(volatile u32 *)0xB0E20040)
+#define NFECCERL0		(*(volatile u32 *)0xB0E200C0)
+#define NFECCERL1		(*(volatile u32 *)0xB0E200C4)
+#define NFECCERL2		(*(volatile u32 *)0xB0E200C8)
+#define NFECCERL3		(*(volatile u32 *)0xB0E200CC)
+#define NFECCERP0		(*(volatile u32 *)0xB0E200F0)
+#define NFECCERP1		(*(volatile u32 *)0xB0E200F4)
+#define NFECCERP2		(*(volatile u32 *)0xB0E200F8)
+#define NFECCERP3		(*(volatile u32 *)0xB0E200FC)
+
+#define PAGE_SIZE		2048
+#define PAGE_PER_BLK	64
+#define BLOCK_SIZE		(PAGE_SIZE * (PAGE_PER_BLK))
+
+#define WRITE_ECC		0
+#define READ_ECC		1
+
+#define NF8_ReadPage_Adv(a,b,c) (((int(*)(u32, u32, u8*))(*((u32 *)0xD0037F90)))(a,b,c))
+
+/* 等待NAND准备好 */
+static void inline nand_wait_ready()
+{
+	while(!(NFSTAT & (1 << 0)));
+}
+
+/* 片选 */
+void inline nand_select_chip()
+{
+	NFCONT &= ~(1 << 1);
+}
+
+/* 取消片选 */
+void inline nand_deselect_chip()
+{
+	NFCONT |= (1 << 1);
+}
+
+/* 发命令 */
+static void inline nand_cmd(u32 cmd)
+{
+	NFCMMD = cmd;
+}
+
+/* 发地址（5个周期） */
+static void nand_addr(u32 addr)
+{
+	u32 col = addr % PAGE_SIZE;	/* 页内偏移 */
+	u32 row = addr / PAGE_SIZE;	/* 页地址 */
+	
+	NFADDR = col & 0xFF;
+	NFADDR = (col >> 8) & 0xF;
+	NFADDR = row & 0xFF;
+	NFADDR = (row >> 8) & 0xFF;
+	NFADDR = (row >> 16) & 0x07;
+}
+
+/* 读1byte数据 */
+static u8 inline nand_read()
+{
+	return NFDATA;
+}
+
+/* 写1byte数据 */
+static void inline nand_write(u8 data)
+{
+	NFDATA = data;
+}
+
+/* 读size byte数据 */
+static void nand_read_buf(u8 *buf, int size)
+{
+	int i = 0;
+	for (; i < size; i++)
+		buf[i] =  NFDATA;
+}
+
+/* 写size byte数据 */
+static void nand_write_buf(u8 *buf, int size)
+{
+	int i = 0;
+	for (; i < size; i++)
+		NFDATA = buf[i];
+}
+
+/* 复位NAND */
+static void nand_reset()
+{
+	nand_select_chip();
+	nand_cmd(0xFF);
+	nand_wait_ready();
+	nand_deselect_chip();
+}
+
+/* NAND初始化 */
+void nand_init()
+{
+	/*
+	** Port Map
+	** CE1->Xm0CSn2-> MP01_2
+	** CE2->Xm0CSn3-> MP01_3
+	** CE3->Xm0CSn4-> MP01_4
+	** CE4->Xm0CSn5-> MP01_5
+	** CLE->Xm0FCLE-> MP03_0
+	** ALE->Xm0FALE-> MP03_1
+	** WE->Xm0FWEn->  MP03_2
+	** RE->Xm0FREn->  MP03_3
+	** RB1->Xm0FRnB0->MP03_4
+	** RB2->Xm0FRnB1->MP03_5
+	** RB3->Xm0FRnB2->MP03_6
+	** RB4->Xm0FRnB3->MP03_7
+	** IO[7:0]->Xm0DATA[7:0]->MP0_6[7:0]
+	*/
+	MP0_1CON &= ~(0xFFFF << 8);
+	MP0_1CON |= (0x3333 << 8);
+	MP0_3CON = 0x22222222;
+	MP0_6CON = 0x22222222;
+	
+		/* HCLK_PSYS=133MHz(7.5ns) */
+	NFCONF =	(0x3 << 23) |	/* Disable 1-bit and 4-bit ECC */
+				/* 下面3个时间参数稍微比计算出的值大些（我这里依次加1），否则读写不稳定 */
+				(0x3 << 12) |	/* 7.5ns * 2 > 12ns tALS tCLS */
+				(0x2 << 8) | 	/* (1+1) * 7.5ns > 12ns (tWP) */
+				(0x1 << 4) | 	/* (0+1) * 7.5 > 5ns (tCLH/tALH) */
+				(0x0 << 3) | 	/* SLC NAND Flash */
+				(0x0 << 2) |	/* 2KBytes/Page */
+				(0x1 << 1);		/* 5 address cycle */
+				
+	/* 
+	** The setting all nCE[3:0] zero can not be allowed. Only 
+	** one nCE can be asserted to enable external NAND flash 
+	** memory. The lower bit has more priority when user set all 
+	** nCE[3:0] zeros. 
+	*/
+	NFCONT =	(0x0 << 16)|	/* Disable Soft Lock */
+				(0x1 << 1) |	/* Disable chip select */
+				(0x1 << 0);		/* Enable NAND Flash Controller */
+				
+	nand_reset();
+}
+
+/* 读NAND ID */
+void nand_read_id(u8 id[])
+{
+	int i;
+	nand_select_chip();
+	nand_cmd(0x90);
+	NFADDR = 0x00;
+	for (i = 0; i < 5; i++)
+		id[i] = nand_read();
+
+	nand_deselect_chip();
+}
+
+/* 擦除一个块 */
+void nand_erase(u32 addr)
+{	
+	if (addr & (BLOCK_SIZE - 1))
+	{
+		printf("not block align\n");
+		return;
+	}
+	u32 row = addr / 2048;
+	
+	nand_select_chip();
+	nand_cmd(0x60);
+	
+	NFADDR = row & 0xFF;			
+	NFADDR = (row >> 8) & 0xFF;
+	NFADDR = (row >> 16) & 0x07;
+	
+	nand_cmd(0xD0);
+	nand_wait_ready();
+	nand_deselect_chip();
+}
+
+/* 初始化ECC模块 */
+void nand_init_hwecc_8bit(u8 mode)
+{	
+	if (mode == READ_ECC)
+	{
+		NFECCCONT &= ~(0x1 << 16);	/* set 8/12/16bit Ecc direction to Encoding */
+		NFECCSTAT |= (1 << 24);		/* clear 8/12/16bit ecc encode done */
+	}
+	else
+	{
+		NFECCCONT |= (0x1 << 16);	/* set 8/12/16bit Ecc direction to Encoding */
+		NFECCSTAT |= (1 << 25);		/* clear 8/12/16bit ecc encode done */
+	}	
+	NFCONT |= (1 << 5);			/* Initialize main area ECC decoder/encoder */
+			  
+	NFECCCONF = (511 << 16) |	/* The ECC message size(For 512-byte message, you should set 511) */
+				(0x3 << 0);		/* 8-bit ECC/512B */
+				
+	NFECCCONT |= (0x1 << 2);	/* Initialize main area ECC decoder/ encoder */
+	NFCONT &= ~(1 << 7);		/* Unlock Main area ECC   */
+}
+
+void nand_calculate_ecc_8bit(u8 *ecc_calc, u8 mode)
+{
+	int i;
+	NFCONT |= (1 << 7);		/* Lock Main area ECC */
+	
+	if (mode == READ_ECC)
+	{
+		/* ECC decoding is completed  */
+		while (!(NFECCSTAT & (1 << 24)));
+	}
+	else
+	{
+		/* ECC encoding is completed  */
+		while (!(NFECCSTAT & (1 << 25)));
+
+		u32 nfeccprgecc0 = 0, nfeccprgecc1 = 0, nfeccprgecc2 = 0, nfeccprgecc3 = 0;
+			
+		/* 读取13 Byte的Ecc Code */
+		nfeccprgecc0 = NFECCPRGECC0;
+		nfeccprgecc1 = NFECCPRGECC1;
+		nfeccprgecc2 = NFECCPRGECC2;
+		nfeccprgecc3 = NFECCPRGECC3;
+
+		ecc_calc[0] = nfeccprgecc0 & 0xFF;
+		ecc_calc[1] = (nfeccprgecc0 >> 8) & 0xFF;
+		ecc_calc[2] = (nfeccprgecc0 >> 16) & 0xFF;
+		ecc_calc[3] = (nfeccprgecc0 >> 24) & 0xFF;
+		ecc_calc[4] = nfeccprgecc1 & 0xFF;
+		ecc_calc[5] = (nfeccprgecc1 >> 8) & 0xFF;
+		ecc_calc[6] = (nfeccprgecc1 >> 16) & 0xFF;
+		ecc_calc[7] = (nfeccprgecc1 >> 24) & 0xFF;
+		ecc_calc[8] = nfeccprgecc2 & 0xFF;
+		ecc_calc[9] = (nfeccprgecc2 >> 8) & 0xFF;
+		ecc_calc[10] = (nfeccprgecc2 >> 16) & 0xFF;
+		ecc_calc[11] = (nfeccprgecc2 >> 24) & 0xFF;
+		ecc_calc[12] = nfeccprgecc3 & 0xFF;
+	}
+}
+
+int nand_correct_data_8bit(u8 *dat)
+{
+	int ret = 0;
+	u32 errNo;
+	u32 erl0, erl1, erl2, erl3, erp0, erp1;
+
+	/* Wait until the 8-bit ECC decoding engine is Idle */
+	while (NFECCSTAT & (1 << 31));
+	
+	errNo = NFECCSECSTAT & 0x1F;
+	erl0 = NFECCERL0;
+	erl1 = NFECCERL1;
+	erl2 = NFECCERL2;
+	erl3 = NFECCERL3;
+	
+	erp0 = NFECCERP0;
+	erp1 = NFECCERP1;
+	
+	if (errNo)
+		printf("errNo = %d\n", errNo);
+	
+	switch (errNo)
+	{
+	case 8:
+		dat[(erl3 >> 16) & 0x3FF] ^= (erp1 >> 24) & 0xFF;
+	case 7:
+		dat[erl3 & 0x3FF] ^= (erp1 >> 16) & 0xFF;
+	case 6:
+		dat[(erl2 >> 16) & 0x3FF] ^= (erp1 >> 8) & 0xFF;
+	case 5:
+		dat[erl2 & 0x3FF] ^= erp1 & 0xFF;
+	case 4:
+		dat[(erl1 >> 16) & 0x3FF] ^= (erp0 >> 24) & 0xFF;
+	case 3:
+		dat[erl1 & 0x3FF] ^= (erp0 >> 16) & 0xFF;
+	case 2:
+		dat[(erl0 >> 16) & 0x3FF] ^= (erp0 >> 8) & 0xFF;
+	case 1:
+		dat[erl0 & 0x3FF] ^= erp0 & 0xFF;
+	case 0:
+		break;
+	default:
+		ret = -1;
+		printf("ECC uncorrectable error detected\n");
+		break;
+	}
+	
+	return ret;
+}
+
+/* 随机读:从任意地址读任意字节的数据 */
+void nand_read_random(u8 *buf, u32 addr, u32 size)
+{	
+	nand_cmd(0);
+	nand_addr(addr);
+	nand_cmd(0x30);
+	nand_wait_ready();
+	
+	int i;
+	u32 col = addr % PAGE_SIZE;	/* 页内偏移 */
+
+	for(i = col; i < size + col; i++)
+	{
+		nand_cmd(0x05);
+		NFADDR = i & 0xFF;
+		NFADDR = (i >> 8) & 0xF;
+		nand_cmd(0xE0);
+		*buf++ = nand_read();
+	}
+}
+
+void nand_read_oob(u8 *buf, u32 addr, u32 size)
+{	
+	nand_cmd(0);
+	
+	u32 col = 2048;	/* 页内偏移 */
+	u32 row = addr / PAGE_SIZE;	/* 页地址 */
+	
+	NFADDR = col & 0xFF;
+	NFADDR = (col >> 8) & 0xF;
+	NFADDR = row & 0xFF;
+	NFADDR = (row >> 8) & 0xFF;
+	NFADDR = (row >> 16) & 0x07;
+	
+	nand_cmd(0x30);
+	nand_wait_ready();
+
+	nand_read_buf(buf, size);
+}
+
+/* 写一页数据 */
+void nand_write_page(u8 *buf, u32 addr, u8 *oob)
+{
+	if (addr & (PAGE_SIZE - 1))
+	{
+		printf("not page align\n");
+		return;
+	}
+	
+	nand_cmd(0x80);
+	nand_addr(addr);
+	nand_wait_ready();
+	
+	nand_write_buf(buf, PAGE_SIZE);
+	
+	nand_write_buf(oob, 64);
+	
+	nand_cmd(0x10);		
+	nand_wait_ready();
+}
+
+/* 写一页数据，同时将Ecc Code写入OOB区 */
+void nand_write_page_8bit(u8 *buf, u32 addr, u8 *oob)
+{
+	if (addr & (PAGE_SIZE - 1))
+	{
+		printf("not page align\n");
+		return;
+	}
+	
+	nand_cmd(0x80);
+	nand_addr(addr);
+	nand_wait_ready();
+	
+	int i;
+	int eccsize = 512;
+	int eccbytes = 13;
+	int eccsteps = PAGE_SIZE / eccsize;
+	int ecctotal = eccsteps * eccbytes;
+	
+	for (i = 0; i < 12; i++)
+		oob[i] = 0xFF;
+	
+	/* 每次写eccsize个字节，分eccsteps次写完一页数据 */
+	for (i = 0; eccsteps; eccsteps--, i += eccbytes, buf += eccsize)
+	{
+		nand_init_hwecc_8bit(WRITE_ECC);					/* 初始化ECC写 */
+		nand_write_buf(buf, eccsize);
+		nand_calculate_ecc_8bit(oob + i + 12, WRITE_ECC);	/* 计算ECC校验码 */
+	}
+	
+	nand_write_buf(oob, 64);					/* 将计算出的ECC写入OOB */
+	
+#if 1
+	printf("--------write Ecc---------\n");
+	for (i = 0; i < 64; i++)
+	{
+		if (i % 8 == 0)
+			putchar('\n');
+		printf("%X ", oob[i]);
+	}
+	putchar('\n');
+#endif	
+	
+	nand_cmd(0x10);
+	nand_wait_ready();
+}
+
+int nand_read_page_8bit(u8 *buf, u32 addr)
+{
+	int err = 0;
+	if (addr & (PAGE_SIZE - 1))
+	{
+		printf("not page align\n");
+		return;
+	}
+	
+	u8 oob[64];
+	nand_read_oob(oob, addr, 64);
+
+	int i;
+#if 1
+	printf("--------read Ecc---------\n");
+	for (i = 0; i < 64; i++)
+	{
+		if (i % 8 == 0)
+			putchar('\n');
+		printf("%X ", oob[i]);
+	}
+	putchar('\n');
+#endif	
+	
+	nand_cmd(0);
+	nand_addr(addr);
+	nand_cmd(0x30);
+	nand_wait_ready();
+	
+	int col;
+	int eccsize = 512;
+	int eccbytes = 13;
+	int eccsteps = PAGE_SIZE / eccsize;
+	int ecctotal = eccsteps * eccbytes;
+	
+	/* 每次写eccsize个字节，分eccsteps次写完一页数据 */
+	for (i = 0, col = 0; eccsteps; eccsteps--, i += eccbytes, buf += eccsize, col += eccsize)
+	{
+		/* 页内偏移 */
+		nand_cmd(0x05);
+		NFADDR = col & 0xFF;
+		NFADDR = (col >> 8) & 0xF;
+		nand_cmd(0xE0);
+		
+		nand_init_hwecc_8bit(READ_ECC);			/* 初始化ECC读 */
+		nand_read_buf(buf, eccsize);
+		/* 下面两种方式都可以 */
+#if 0
+		nand_cmd(0x05);
+		NFADDR = (2048 + i + 12)& 0xFF;
+		NFADDR = ((2048 + i + 12) >> 8) & 0xF;
+		nand_cmd(0xE0);
+		nand_read_buf(oob, eccbytes);
+#else
+		nand_write_buf(oob + 12 + i, eccbytes);
+#endif
+		
+		nand_calculate_ecc_8bit(0, READ_ECC);	/* 计算ECC校验码 */
+		if (nand_correct_data_8bit(buf) < 0)
+			err++;
+	}
+	
+	return err;
+}
+
+/*
+** 三星提供的固化在iROM里的函数
+** 使用8位硬件ECC读取1页数据
+** 成功返回0，否则返回1
+*/
+int NF8_ReadPage_8ECC(u32 addr, u8 *buf)
+{
+	if (addr & (PAGE_SIZE - 1))
+	{
+		printf("not page align\n");
+		return;
+	}
+	
+	int page = addr / PAGE_SIZE;
+	int ret = NF8_ReadPage_Adv(page / PAGE_PER_BLK, page % PAGE_PER_BLK, buf);
+	return ret;
+}
+
+
+
+
+
+/*********************************** 15.int ********************************************/
+
+CPSR_cxsf	//开总中断,需要刷这里arm架构规定的寄存器	
+s5pv210有四组中断源,换言之有4组寄存器VIC0,VIC1,VIC2,VIC3
+以VIC0为例:具体寄存器有
+VIC0这组寄存器的起始地址:
+#define VIC0_BASE					(0xF2000000)
+具体地址有:
+#define		VIC0IRQSTATUS			( *((volatile unsigned long *)(VIC0_BASE + 0x00)) )
+	//IRQ状态寄存器 表示对应的中断是否active
+#define		VIC0FIQSTATUS			( *((volatile unsigned long *)(VIC0_BASE + 0x04)) )
+	//FIQ状态寄存器 表示对应的中断是否active
+#define		VIC0RAWINTR			( *((volatile unsigned long *)(VIC0_BASE + 0x08)) )
+	//标示指定中断作为FIQ是否被激活,在此中断源被选择和使能前
+#define		VIC0INTSELECT			( *((volatile unsigned long *)(VIC0_BASE + 0x0c)) )
+	//选择中断是FIQ还是IRQ模式
+#define		VIC0INTENABLE			( *((volatile unsigned long *)(VIC0_BASE + 0x10)) )
+	//是能中断寄存器
+#define		VIC0INTENCLEAR			( *((volatile unsigned long *)(VIC0_BASE + 0x14)) )
+	//关闭中断寄存器
+#define		VIC0SOFTINT			( *((volatile unsigned long *)(VIC0_BASE + 0x18)) )
+	//软件中断寄存器, 写操作能使能软件中断,读操作能读出软件中断的状态是否active
+#define		VIC0SOFTINTCLEAR		( *((volatile unsigned long *)(VIC0_BASE + 0x1c)) )
+	//软件中断关闭寄存器
+#define		VIC0PROTECTION			( *((volatile unsigned long *)(VIC0_BASE + 0x20)) )
+	//中断保护寄存器,使能时,只有高级的privileged 模式才能访问中断寄存器
+#define		VIC0SWPRIORITYMASK		( *((volatile unsigned long *)(VIC0_BASE + 0x24)) )
+	//中断优先级标记寄存器
+#define		VIC0PRIORITYDAISY		( *((volatile unsigned long *)(VIC0_BASE + 0x28)) )
+	//中断级别设置(1-16级)寄存器1
+#define 	VIC0VECTADDR			(VIC0_BASE + 0x100)
+	//放置注册的ISR中断处理函数地址的寄存器
+#define 	VIC0VECPRIORITY			( *((volatile unsigned long *)(VIC0_BASE + 0x200)) )
+	//中断级别设置(1-16级)寄存器2
+#define 	VIC0ADDR			( *((volatile unsigned long *)(VIC0_BASE + 0xf00)) )
+	//用来保存当前发生的中断的处理函数
+#define 	VIC0PERID0			( *((volatile unsigned long *)(VIC0_BASE + 0xfe0)) )
+#define 	VIC0PERID1			( *((volatile unsigned long *)(VIC0_BASE + 0xfe4)) )
+#define 	VIC0PERID2			( *((volatile unsigned long *)(VIC0_BASE + 0xfe8)) )
+#define 	VIC0PERID3			( *((volatile unsigned long *)(VIC0_BASE + 0xfec)) )
+	//这四个寄存器放置了periphid值
+	//VIC0PERID33里有一项是设定允许同时有多少个中断发生
+#define 	VIC0PCELLID0			( *((volatile unsigned long *)(VIC0_BASE + 0xff0)) )
+#define 	VIC0PCELLID1			( *((volatile unsigned long *)(VIC0_BASE + 0xff4)) )
+#define 	VIC0PCELLID2			( *((volatile unsigned long *)(VIC0_BASE + 0xff8)) )
+#define 	VIC0PCELLID3			( *((volatile unsigned long *)(VIC0_BASE + 0xffc)) )
+	//这一组放置pcellid的寄存器.
+中断向量表位置_在IRAM里头的	
+#define		_Exception_Vector			0xD0037400
+#define		 pExceptionRESET			( *((volatile unsigned long *)(_Exception_Vector + 0x0)) )
+#define		 pExceptionUNDEF			( *((volatile unsigned long *)(_Exception_Vector + 0x4)) )
+#define		 pExceptionSWI				( *((volatile unsigned long *)(_Exception_Vector + 0x8)) )
+#define		 pExceptionPABORT			( *((volatile unsigned long *)(_Exception_Vector + 0xc)) )
+#define 	 pExceptionDABORT			( *((volatile unsigned long *)(_Exception_Vector + 0x10)) )
+#define		 pExceptionRESERVED			( *((volatile unsigned long *)(_Exception_Vector + 0x14)) )
+#define 	 pExceptionIRQ				( *((volatile unsigned long *)(_Exception_Vector + 0x18)) )
+#define 	 pExceptionFIQ				( *((volatile unsigned long *)(_Exception_Vector + 0x1c)) )
+中断系统初始化及处理步骤:
+第一步:
+当系统接收到异常会自动跳到 中断向量表 寻求解决方案,其中,IRQ,FIQ中断都属于异常的一种
+因为所有的中断都会先跳到中断向量表,从表里转到对应的处理程序
+//设置中断向量表;(给表里填入处理程序的地址)
+pExceptionUNDEF	  =	(unsigned long)exceptionundef;
+pExceptionSWI  	  =	(unsigned long)exceptionswi;
+pExceptionPABORT  =	(unsigned long)exceptionpabort;
+pExceptionDABORT  =	(unsigned long)exceptiondabort;
+pExceptionIRQ	  =	(unsigned long)IRQ_handle;
+pExceptionFIQ	  =	(unsigned long)IRQ_handle;   //这里只讨论IRQ中断,所以处理函数IRQ_handle重点
+第二步:
+// 禁止所有中断
+VIC0INTENCLEAR = 0xffffffff;
+VIC1INTENCLEAR = 0xffffffff;
+VIC2INTENCLEAR = 0xffffffff;
+VIC3INTENCLEAR = 0xffffffff;
+//选择中断类型为IRQ
+VIC0INTSELECT = 0x0;
+VIC1INTSELECT = 0x0;
+VIC2INTSELECT = 0x0;
+VIC3INTSELECT = 0x0;
+//清除VICxADDR(VICxADDR:保存着当前正在处理的中断的中断处理函数的地址)
+VIC0ADDR = 0;
+VIC1ADDR = 0;
+VIC2ADDR = 0;
+VIC3ADDR = 0;
+第三步:
+// 外部中断相关的设置
+// 1111 = EXT_INT[16] 
+GPH2CON |= 0xF;	//GPH2第 0 bit 设置为EXT_INT[16]   1111 = EXT_INT[16] 
+EXT_INT_2_CON |= 1<<1;	//设置中断EXT_INT[16]触发的形式    010 = Falling edge triggered
+EXT_INT_2_MASK &= ~(1<<0);	// unmasked 设置不要屏蔽这个中断的发生
+#define NUM_EINT16_31	(16)  // EXT_INT[16]对应的init number 为 16
+ *( (volatile unsigned long *)(VIC0VECTADDR + 4*NUM_EINT16_31) ) = (unsigned)isr_key;   //注册放置EXT_INT[16]外部中断的中断处理函数地址
+第四步:
+//使能中断
+temp = VIC0INTENABLE; //取出数值
+temp |= (1<<NUM_EINT16_31);  //添加使能EXT_INT[16] 的内容
+VIC0INTENABLE = temp; //写寄存器
+完成中断设置后,中断发生时:
+按下key1 -> 产生外部中断 EINT16_31(把注册好的中断处理函数isr_key的地址放到VIC0ADDR里) -> 中断向量表IRQ -> IRQ_handler -> irq_handler
+//IRQ_handler:
+IRQ_handle:
+	// 设置中断模式的栈
+	ldr sp, =0xD0037F80
+	// 保存现场
+	sub lr, lr, #4				
+	stmfd sp!, {r0-r12, lr}
+	// 跳转到中断处理函数
+	bl	irq_handler		
+	// 恢复现场
+	ldmfd sp!, {r0-r12, pc}^
+//isr_handler
+//读取VIC0ADDR值转为函数地址
+//跳转到中断处理函数
+void (*isr)(void) = NULL;
+isr = (void (*)(void)) VIC0ADDR;
+
+
+
+
+/*********************************** 16.timer  (pwm定时器) ********************************************/
+16.timer  (pwm定时器)
+S5PV210 共有 5 个 32bit 的 PWM 定时器,其中定时器 0、1、2、3 有 PWM 功能,定时器 4 没有输出引脚
+#define		PWMTIMER_BASE			(0xE2500000)
+	//pwm寄存器的基地址
+#define		TCFG0    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x00)) )
+#define		TCFG1    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x04)) )
+	//pwm定时器的设置寄存器 主要设置定时器的输入时钟频率Timer Input Clock Frequency
+	//计算公式:Timer Input Clock Frequency = PCLK / ( {prescaler value + 1} ) / {divider value}
+	//{prescaler value} = 1~255
+	//{divider value} = 1, 2, 4, 8, 16, TCLK
+	//Dead zone length = 0~254
+	//Prescaler 1: prescaler value服务于pwm timer2/3/4
+	//Prescaler 0: prescaler value服务于pwm timer0/1
+	//Divider MUXn :对应的 pwm timern 的 divider value
+#define		TCON      	( *((volatile unsigned long *)(PWMTIMER_BASE+0x08)) )
+	//pwm控制寄存器
+	//Timer n Start/Stop :pwm timern开关
+	//Timer n Manual Update:   更新定时器的峰值和比较值
+	//Timer n Output Inverter on/off; pwm信号针口输出开关 注意n为4,即pwm定时器4没有输出外部信号的功能,所以也没有这个控制bit
+	//Timer n Auto Reload on/off:    倒数计数器到0后自动复位
+#define		TCNTB0    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x0C)) )
+	//pwm0定时器 的 数值缓存器 放峰值
+#define		TCMPB0    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x10)) )
+	//pwm0定时器 的 比较缓存器 放比较值
+#define		TCNTO0    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x14)) )
+	//pwm0定时器 的	当前计数值缓存器
+	//pwm原理一般是让计数器据输入频率开始+1计数并把当前值放TCNTO,
+	//当TCNTO累计值等同 TCMPB0 的比较值 就会产生中断并反向信号输出
+	//当TCNTO累计值等同 TCNTB0 的自定义峰值,也会产生中断并反向信号输出 并让 TCNTO 清零 重新计数
+	//当然这是 一般模式 ,可能也有其他模式 根据设置, 比如,只有在峰值时
+	//这些模式的设置具体由 Timer n Auto Reload on/off  Timer n Manual Update 决定
+#define		TCNTB1    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x18)) )
+#define		TCMPB1    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x1C)) )
+#define		TCNTO1    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x20)) )
+#define		TCNTB2    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x24)) )
+#define		TCMPB2    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x28)) )
+#define		TCNTO2    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x2C)) )
+#define		TCNTB3    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x30)) )
+#define		TCMPB3    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x34)) )
+#define		TCNTO3    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x38)) )
+#define		TCNTB4    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x3C)) )
+#define		TCNTO4    	( *((volatile unsigned long *)(PWMTIMER_BASE+0x40)) )
+	//与pwm0对的同理
+#define		TINT_CSTAT 	( *((volatile unsigned long *)(PWMTIMER_BASE+0x44)) )
+	//pwm中断控制器
+	//Timer n interrupt Enable: 中断开关
+	//Timer n Interrupt Status: 中断状态(也称中断flag),写1清flag
+使用步骤;
+因为要使用中断所以先设置好中断体系:
+//设置中断向量表;(给表里填入处理程序的地址)
+pExceptionUNDEF	  =	(unsigned long)exceptionundef;
+pExceptionSWI  	  =	(unsigned long)exceptionswi;
+pExceptionPABORT  =	(unsigned long)exceptionpabort;
+pExceptionDABORT  =	(unsigned long)exceptiondabort;
+pExceptionIRQ	  =	(unsigned long)IRQ_handle;
+pExceptionFIQ	  =	(unsigned long)IRQ_handle;   //这里只讨论IRQ中断,所以处理函数IRQ_handle重点
+// 禁止所有中断
+VIC0INTENCLEAR = 0xffffffff;
+VIC1INTENCLEAR = 0xffffffff;
+VIC2INTENCLEAR = 0xffffffff;
+VIC3INTENCLEAR = 0xffffffff;
+//选择中断类型为IRQ
+VIC0INTSELECT = 0x0;
+VIC1INTSELECT = 0x0;
+VIC2INTSELECT = 0x0;
+VIC3INTSELECT = 0x0;
+//清除VICxADDR(VICxADDR:保存着当前正在处理的中断的中断处理函数的地址)
+VIC0ADDR = 0;
+VIC1ADDR = 0;
+VIC2ADDR = 0;
+VIC3ADDR = 0;
+初始化定时器0 前准备
+TCON = 0; //停止所有定时器
+int counter = 0; //计数中断发生的次数的变量 先清零
+设置定时器中断
+#define NUM_TIMER0				(21)
+*( (volatile unsigned long *)(VIC0VECTADDR + 4*NUM_TIMER0) ) = (unsigned)irs_timer; //注册中断处理函数irs_timer地址
+//使能中断 pwm timern 的中断开关有两重, 这里是关于设置VIC内容的开关
+temp = VIC0INTENABLE; //取出数值
+temp |= (1<<NUM_TIMER0);  //添加使能timer0 的内容
+VIC0INTENABLE = temp; //写寄存器
+初始定时器0
+//选Prescaler 0 设置Prescaler 值为66
+temp0 = TCFG0;
+temp0 = (temp0 & (~(0xff00ff))) | ((uprescaler-1)<<0);
+TCFG0 = temp0;
+// 设置Divider MUX 16分频
+temp0 = TCFG1;
+temp0 = (temp0 & (~(0xf<<4*utimer))& (~(1<<20))) |(udivider<<4*utimer);
+TCFG1 = temp0;
+// 1s = 62500hz
+TCNTB0 = 62500; //加载峰值
+		//注意,未知是否有其他模式 但是这里的pwm运行与默认模式
+		//默认模式是:计数器TCNTO采取倒数方法,从峰值开始倒数,低电平信号开始,遇到比较缓存的值时,变为高电平,到达0时重置,并触发中断
+		//如果设置了对应针口输出信号时,针口会输出对应电平的变化,而这里并没有设置针口输出信号
+TCMPB0 = 0;	//加载比较值
+		//设置比较值为0, 按默认模式,这么说来,pwm全程低电平信号
+		//注意,按默认模式,中断是由计数器TCNTO倒数到0时触发
+TCON |= 1<<1;	//更新峰值,更新比较值
+		//填写TCNTB0 TCMPB0 时,还不能被定时器所使用,需要Timer n Manual Update 写1 才能更新,从而被定时器使用
+		//如果Timer n Manual Update 保持1 ,那么,日后修改TCNTB0 或 TCMPB0 都会自动更新
+TCON &= ~(1<<1);//所以更新后就改 0 ,以防误操作写TCNTB0 TCMPB0 导致更新	
+TCON |= (1<<0)|(1<<3); //Timer n Auto Reload on/off 置1 表示计数器倒数到0时,自动复位, 
+		       //Timer n Start/Sto 置1 开启 pwm定时器
+//使能中断 这里是第二重开观,是pwm timer0 的自身开关,两重开关都打开时,timer中断才正式生效
+temp0 = TINT_CSTAT;
+temp0 = (temp0 & (~(1<<utimer)))|(1<<(utimer));
+TINT_CSTAT = temp0;
+最后,这里比较值为0,意味意味着,pwm信号一直低电平,而且,没有设置跟对应针口输出实际信号,而到时62500后便中断一次,
+irs_timer中断函数是每次中断counter+1并打印,不再贴出函数
+
+
+
+/*********************************** 17.watchdog ********************************************/
+
+看门狗涉及两种异常状态的处理,对应中断向量表的两项内容,复位行为对应中断向量表的reset,中断行为操作则使用中断向量表的IRQ handler
+看门狗也有一个自身的timer定时器
+#define WDT_BASE			(0xE2700000)
+	//watchdog寄存器基地址
+#define WTCON			( *((volatile unsigned long *)(WDT_BASE+0x00)) )
+	//watchdog timer clock frequency = 1/( PCLK / (Prescaler value + 1) / Division_factor )
+	//Prescaler value : 0 ~ 2^8-1
+	//Watchdog timer开关
+	//Clock select : division 选择
+	//Interrupt generation :中断开关
+	//Reset enable/disable 是否启用复位当 watchdog time-out 时
+#define WTDAT			( *((volatile unsigned long *)(WDT_BASE+0x04)) )
+	//定时器时间值(也叫定时器的计数峰值吧)
+#define WTCNT			( *((volatile unsigned long *)(WDT_BASE+0x08)) )
+	//定时器当前计数值
+#define WTCLRINT			( *((volatile unsigned long *)(WDT_BASE+0x0C)) )
+	//写任意值清中断flag
+使用步骤
+第一步
+因为要使用中断所以先设置好中断体系:
+//设置中断向量表;(给表里填入处理程序的地址)
+pExceptionUNDEF	  =	(unsigned long)exceptionundef;
+pExceptionSWI  	  =	(unsigned long)exceptionswi;
+pExceptionPABORT  =	(unsigned long)exceptionpabort;
+pExceptionDABORT  =	(unsigned long)exceptiondabort;
+pExceptionIRQ	  =	(unsigned long)IRQ_handle;
+pExceptionFIQ	  =	(unsigned long)IRQ_handle;   //这里只讨论IRQ中断,所以处理函数IRQ_handle重点
+// 禁止所有中断
+VIC0INTENCLEAR = 0xffffffff;
+VIC1INTENCLEAR = 0xffffffff;
+VIC2INTENCLEAR = 0xffffffff;
+VIC3INTENCLEAR = 0xffffffff;
+//选择中断类型为IRQ
+VIC0INTSELECT = 0x0;
+VIC1INTSELECT = 0x0;
+VIC2INTSELECT = 0x0;
+VIC3INTSELECT = 0x0;
+//清除VICxADDR(VICxADDR:保存着当前正在处理的中断的中断处理函数的地址)
+VIC0ADDR = 0;
+VIC1ADDR = 0;
+VIC2ADDR = 0;
+VIC3ADDR = 0;
+第二步
+*( (volatile unsigned long *)(VIC0VECTADDR + 4*NUM_WDT) ) = (unsigned)isr_wtd; //注册watchdog中断程序
+//使能中断
+temp = VIC0INTENABLE; //取出数值
+temp |= (1<<NUM_WDT);  //添加使能EXT_INT[16] 的内容
+VIC0INTENABLE = temp; //写寄存器
+第三步
+设置并启动了watchdog timer,启动中断,关闭复位
+WTDAT = 100000000;
+WTCNT = 100000000;
+WTCON = (uenreset<<0)	//uenreset:0 关闭复位功能  
+	|(uenint<<2)	//uenint:1 开启中断功能	
+	|(uselectclk<<3)	//uselectclk:0 division为16
+	|(uenwtd<<5)		//uenwtd:1 开启 watchdog timer 
+	|((uprescaler)<<8);	//uprescaler 100
+第四步
+以上三步,watchdog就已经正常工作了,watchdog timer 计数器会从 WTCNT 预设的值倒数
+当倒数到零时会引发 中断(而不是reset,因为关闭了reset功能,开启了中断功能) 并复位WTCNT的值(把WTDAT的值赋予WTCNT)
+那么当程序执行过程中,不断地 更新写 WTCNT 让它不至于倒数到0,这样便可以避免中断的发生
+一旦 WTCNT 倒数至0,中断产生,最终执行 isr_wtd 中断处理程序
+//isr_wtd
+记录发生中断的次数,直到次数到达5次,更改watchdog设置
+WTDAT = 100000000;
+WTCNT = 100000000;
+WTCON = (uenreset<<0)	//uenreset:1 开启复位reset功能  
+	|(uenint<<2)	//uenint:1 开启中断功能	
+	|(uselectclk<<3)	//uselectclk:0 division为16
+	|(uenwtd<<5)		//uenwtd:1 开启 watchdog timer 
+	|((uprescaler)<<8);	//uprescaler 100
+这时,当下次 WTCNT 倒数置0时,会同时触发中断和复位异常,
+但是,复位异常优先级比中断异常高,所以最终执行reset芯片(即重启)而不是执行isr_wtd中断处理函数
+
+
+
+/*********************************** 18.rtc ********************************************/
+18.rtc
+s5pv210自带的实时时钟功能
+#define RTC_BASE				(0xE2800000)
+	//rtc 基地址
+#define		INTP      	 ( *((volatile unsigned long *)(RTC_BASE + 0x30)) )
+	//中断flag :闹钟中断flag  Time TIC中断flag  都写1清flag
+#define		RTCCON    	 ( *((volatile unsigned long *)(RTC_BASE + 0x40)) )
+	//RTC控制寄存器
+	//CLKOUTEN: 是否把时钟信号输出到 XRTCCLKO 针口
+	//TICEN: tick timer开关
+	//TICCKSEL: Tick timer sub clock selection
+	//CLKRST: 实时时钟复位
+	//CNTSEL: BCD count select
+	//CLKSEL: BCD clock select.
+	//RTCEN: RTC控制器开关 
+#define		TICCNT    	 ( *((volatile unsigned long *)(RTC_BASE + 0x44)) )
+	//tick timer 计数器
+#define		RTCALM    	 ( *((volatile unsigned long *)(RTC_BASE + 0x50)) )
+	//ALMEN: 闹钟总开关
+	//YEAREN: Enables Year alarm
+	//MONEN: Enables Month alarm
+	//DAYEN; Enables Day alarm
+	//HOUREN: Enables Hour alarm
+	//MINEN: Enables Minute alarm
+	//SECEN: Enables Second alarm
+#define		ALMSEC    	 ( *((volatile unsigned long *)(RTC_BASE + 0x54)) )
+	//秒级闹钟值设置: 填入的是bcd码
+	//[6:4] 设十位数
+	//[3:0] 设个位数
+#define		ALMMIN    	 ( *((volatile unsigned long *)(RTC_BASE + 0x58)) )
+	//分钟级闹钟值设置 填入的是bcd码
+#define		ALMHOUR  	 ( *((volatile unsigned long *)(RTC_BASE + 0x5c)) )
+	//小时级闹钟值设置 填入的是bcd码
+#define		ALMDATE    	 ( *((volatile unsigned long *)(RTC_BASE + 0x60)) )
+	//日期级闹钟值设置 填入的是bcd码
+#define		ALMMON    	 ( *((volatile unsigned long *)(RTC_BASE + 0x64)) )
+	//月级闹钟值设置 填入的是bcd码
+#define		ALMYEAR  	 ( *((volatile unsigned long *)(RTC_BASE + 0x68)) )
+	//年级闹钟值设置 填入的是bcd码
+#define		RTCRST     	 ( *((volatile unsigned long *)(RTC_BASE + 0x6c)) )
+	//芯片说明书并没有
+#define		BCDSEC    	 ( *((volatile unsigned long *)(RTC_BASE + 0x70)) )
+#define		BCDMIN   	 ( *((volatile unsigned long *)(RTC_BASE + 0x74)) )
+#define		BCDHOUR    	 ( *((volatile unsigned long *)(RTC_BASE + 0x78)) )
+#define		BCDDATE    	 ( *((volatile unsigned long *)(RTC_BASE + 0x7c)) )
+#define		BCDDAY     	 ( *((volatile unsigned long *)(RTC_BASE + 0x80)) )
+#define		BCDMON     	 ( *((volatile unsigned long *)(RTC_BASE + 0x84)) )
+#define		BCDYEAR     	 ( *((volatile unsigned long *)(RTC_BASE + 0x88)) )
+	//上面7项是bcd 时钟值
+#define		CURTICCNT   	 ( *((volatile unsigned long *)(RTC_BASE + 0x90)) )
+	//tick timer 计数器 当前值
+#define		RTCLVD    	 ( *((volatile unsigned long *)(RTC_BASE + 0x94)) )
+	//芯片说明书并没有
+
+使用步骤:
+第一步:
+先设置好中断体系 (然而似乎并没有用到中断)
+第二步:
+读时钟
+//使能rtc控制器 意味着更改 rtc一类寄存器 有效
+uread = RTCCON; //保存设置
+RTCCON = (uread&~(1<<0))|(1); //添加开启控制器操作
+//使能tick imer 意味着本来就运行的时钟 会 把时钟值更新到 BCDXX 的寄存器上
+uread = RTCCON; //保存设置
+RTCCON = ( (uread&~(1<<8)) | (1<<8) ); //添加开启tick timer操作
+//读取当前时钟值: BCDSEC BCDMIN BCDHOUR BCDDATE BCDDAY BCDMON BCDYEAR 会随着时间变化而更换值,存着当前时间的bcd码
+uyear = BCDYEAR;
+uyear = 0x2000 + uyear;
+umonth= BCDMON;
+udate = BCDDATE;
+uhour = BCDHOUR;
+umin  = BCDMIN;
+usec  = BCDSEC;
+uday  = BCDDAY;
+printf("%2x : %2x : %2x  %10s,  %2x/%2x/%4x\r\n", uhour, umin, usec, day[uday], umonth, udate, uyear);
+	//printf时顺便把bcd码转换了成数字字符串格式
+//关闭tick imer 意味着本来就运行的时钟 不会 把时钟值更新到 BCDXX 的寄存器上
+uread = RTCCON; //保存设置
+RTCCON = ( (uread&~(1<<8)) | (0<<8) ); //添加关闭tick timer操作
+//关闭rtc控制器 意味着更改 rtc一类寄存器 无效
+uread = RTCCON; //保存设置
+RTCCON = (uread&~(1<<0))|(1); //添加关闭控制器操作
+第三步:
+设时钟
+// 设重置重置值
+unsigned long year = 12;
+unsigned long month = 5;
+unsigned long date = 1;
+unsigned long hour = 12;
+unsigned long min = 0;
+unsigned long sec = 0;
+unsigned long weekday= 3;
+//将时间转化为BCD码
+year = ( ((year/100)<<8) +(((year/10)%10)<<4) + (year%10)  );
+month  = ( ((month/10)<<4)+ (month%10) );
+date = ( ((date/10)<<4) + (date%10) );
+weekday = (weekday%10);							
+hour =( ((hour/10)<<4) + (hour%10) );
+min  =( ((min/10)<<4)  + (min%10) );
+sec  =( ((sec/10)<<4)  + (sec%10) );
+//使能rtc控制器 意味着更改 rtc一类寄存器 有效
+uread = RTCCON; //保存设置
+RTCCON = (uread&~(1<<0))|(1); //添加开启控制器操作
+// 保存BCD码
+BCDSEC  = sec;
+BCDMIN  = min;
+BCDHOUR = hour;
+BCDDATE = date;
+BCDDAY  = weekday;
+BCDMON  = month;
+BCDYEAR = year;
+//关闭rtc控制器 意味着更改 rtc一类寄存器 无效
+uread = RTCCON; //保存设置
+RTCCON = (uread&~(1<<0))|(1); //添加关闭控制器操作
+
+
+/*********************************** 20.adc ********************************************/
+
+模拟信号转换为数字信号
+注意,adc与触摸屏功能捆绑一起,因为触摸屏也需要adc功能 后面寄存器TS表示是触摸屏
+adc的使用时钟频率公式以及转换时间公式
+When the PCLK frequency is 66MHz and the prescaler value is 65, total 12-bit conversion time is as follows.
+• A/D converter freq. = 66MHz/(65+1) = 1MHz
+• Conversion time = 1/(1MHz / 5cycles) = 1/200kHz = 5us
+NOTE: This A/D converter was designed to operate at maximum 5MHz clock, so the conversion rate can go up to 1MSPS
+总共有9条adc通道,后面只以adc0举例
+#define		ADCTS_PRSCVL		65
+#define 	ADCTS_BASE			0xE1700000
+	//ADC 基地址
+#define 	TSADCCON0			( *((volatile unsigned long *)(ADCTS_BASE+0x0)) )
+	//TSSEL: 触摸屏用到的adc线设置
+	//RES: adc分辨率
+	//ECFLG; 结束转换时flag
+	//PRSCEN: adc转转的prescaler 开关
+	//PRSCVL: prescaler 值
+	//STANDBY: Standby mode select ????/
+	//READ_ START: 读TSDATX0寄存器操作时,启动下一个转换操作 的这么一个功能的开关
+	//ENABLE_START: 开始转换开关
+#define    	TSCON0				( *((volatile unsigned long *)(ADCTS_BASE+0x4)) )
+	//触摸屏控制寄存器
+#define    	TSDLY0				( *((volatile unsigned long *)(ADCTS_BASE+0x8)) )
+	//adc 延迟寄存器
+	//FILCLKsrc: 延迟使用的时钟资源 X-tal clock  RTC clock
+	//DELAY: 延迟值
+#define    	TSDATX0				( *((volatile unsigned long *)(ADCTS_BASE+0xc)) )
+	//adc转换后x轴数据寄存器
+	//UPDOWN: Up or Down state of stylus pen at Waiting for Interrupt Mode.笔点的触摸屏
+	//AUTO_PST_VAL: Monitoring value of AUTO_PST field in TSCONn register
+	//XY_PST_VAL: Monitoring value of XY_PST field in TSCONn register
+	//XPDATA: 转换后的数据值
+#define    	TSDATY0				( *((volatile unsigned long *)(ADCTS_BASE+0x10)) )
+	//adc转换后y轴数据寄存器
+	//UPDOWN: Up or Down state of stylus pen at Waiting for Interrupt Mode.????
+	//AUTO_PST_VAL: Monitoring value of AUTO_PST field in TSCONn register
+	//XY_PST_VAL: Monitoring value of XY_PST field in TSCONn register
+	//YPDATA: 转换后的数据值
+#define    	TSPENSTAT0			( *((volatile unsigned long *)(ADCTS_BASE+0x14)) )
+	//触屏笔状态寄存器
+#define    	CLRINTADC0			( *((volatile unsigned long *)(ADCTS_BASE+0x18)) )
+	//adc中断清flag寄存器,写入任何值清flag
+#define  	ADCMUX				( *((volatile unsigned long *)(ADCTS_BASE+0x1c)) )
+	//adc通道选择寄存器
+#define		CLRINTPEN0			( *((volatile unsigned long *)(ADCTS_BASE+0x20)) )
+	//触屏笔中断清flag寄存器,写入任何值清flag
+使用步骤:
+不用什么准备工作,直接设置,不用初始化中断体系
+//设置1mhz的时钟:  A/D converter freq. = 66MHz/(65+1) = 1MHz
+TSADCCON0 = (1<<16)	//12bit A/D分辨率
+	|(1 << 14) 	//使能 prescaler
+	|(65 << 6);	//prescaler 值 为65
+TSADCCON0 &= ~((1<<2)	//设为普通转换模式 非standby mode 注意&和~符号
+	|(1<<1));	//禁止read_start,禁止一个这样的功能 读TSDATX0寄存器操作启动下一个转换操作
+ADCMUX = 0;		//选择通道0
+TSADCCON0 |= (1 << 0);	//启动A/D转换 [0]值设1
+while (TSADCCON0 & (1 << 0)); //当A/D转换 真正开始 时，位[0]会自动清0
+while (!(TSADCCON0 &  (1 << 15)) ); //检测位[15]，当它为1时表示转换结束
+return (TSDATX0 & 0xfff); //读取数据
+
+
+/*********************************** 21.shell ********************************************/
+
+这里谈论纯软件问题,建立一个命令行交互程序
+交互程序主体:
+while (1)
+{
+	printf("mini210s: ");
+	gets(buf);			// 等待用户输入命令 buffer是一个指针 gets(buf)相当于给这个指针添加指向的内容
+	argc = shell_parse(buf, argv);	// 解析命令
+	command_do(argc, argv);		// 运行命令
+}
+//获取命令
+char * gets(char * s)
+{
+	char * p = s;	
+	while ((*p = getchar()) != '\n')
+	{
+		if (*p != '\b')
+			putchar(*p++);
+		else	
+			if (p > s)
+				putchar(*p--);	
+	}	
+	*p = '\0';
+	putchar('\n');		
+	return s;
+}
+// 解析命令
+int shell_parse(char * buf, char * argv[])
+{
+	int argc = 0;
+	int state = 0;	
+	// 逐个读出字符
+	while (*buf)
+	{
+		// 获得一个单词
+		if (*buf != ' ' && state == 0)
+		{
+			argv[argc++] = buf;
+			state = 1;
+		}		
+		// 跳过空格
+		if (*buf == ' ' && state == 1)
+		{
+			*buf = '\0';
+			state = 0;
+		}		
+		buf++;	
+	}	
+	return argc;
+}
+// 根据命令执行对应的代码
+int command_do(int argc, char * argv[])
+{
+	if (argc == 0)
+		return -1;
+	if (strcmp(argv[0], "help") == 0)
+		help(argc, argv);		
+	if (strcmp(argv[0], "md") == 0)
+		md(argc, argv);
+	if (strcmp(argv[0], "mw") == 0)
+		mw(argc, argv);	
+	if (strcmp(argv[0], "loadb") == 0)
+		loadb(argc, argv);
+	if (strcmp(argv[0], "go") == 0)
+		go(argc, argv);		
+	return 0;
+}
+// help 命令
+int help(int argc, char * argv[])
+{
+	printf("help usage:\r\n");
+	printf("md - memory dispaly\r\n");
+	printf("mw - memory write\r\n");
+	printf("loadb - loadb filesize addr\r\n");
+	printf("go - go addr\r\n");
+	return 0;
+}
+// 读内存
+int md(int argc, char * argv[])
+{	
+	int * p = (int *)0;
+	int i, j;	
+	if (argc >= 2)
+		p = (int *)atoi(argv[1]);		
+	for (j = 0; j < 16; j++)
+	{	
+		printf("%8x: ", (int)p);
+		for (i = 0; i < 4; i++)
+			printf("%8x ", *p++);	
+		printf("\r\n");
+	}		
+	return 0;
+}
+// 写内存
+int mw(int argc, char * argv[])
+{	
+	int *p = NULL;
+	int v = 0;	
+	if (argc >= 2)
+		p = (int *)atoi(argv[1]);		
+	if (argc >= 3)
+		v = atoi(argv[2]);		
+	*p = v;	
+	return 0;
+}
+// 串口下载
+int loadb(int argc, char * argv[])
+{
+	int i = 0;
+	int size = 0;
+	char *p = NULL;
+	// 文件大小
+	if (argc >= 2)
+	{
+		size = atoi(argv[1]);		
+	}	
+	// 下载地址
+	if(argc == 3)
+	{
+		p = (char *)atoi(argv[2]);
+	}	
+	printf("load bin file to address 0x%x\r\n", (unsigned int)p);	
+	for (i = 0; i < size; i++)
+		*p++ = getc();	
+	printf("load finished! \r\n");	
+	return 0;
+}
+// 执行内存中的bin文件
+int go(int argc, char * argv[])
+{
+	int addr = 0x21000000;
+	void (*fp)(void);	
+	if (argc >= 2)
+		addr = atoi(argv[1]);	
+	printf("go to address 0x%x\r\n", addr);
+	fp = (void (*)(void))addr;	
+	fp();	
+	return 0;
+}	
+
+
+
+/*********************************** 22.audio(可运行) ********************************************/
+
+I2C 与 I2S 通讯结构
+I2C
+#define GPD1CON    	(*(volatile unsigned *)0xE02000C0) //Port D1 control
+#define GPD1DAT    	(*(volatile unsigned *)0xE02000C4) //Port D1 data
+#define GPD1PUD    	(*(volatile unsigned *)0xE02000C8) //Pull-up control D
+I2c功能寄存器
+#define I2CCON0  	(*(volatile unsigned *)0xE1800000) //IIC control
+	//I2C控制寄存器; 
+	//Acknowledge generation: ack信号产生 开关
+	//Tx clock source selection ; 0: I2CCLK = fPCLK /16   1: I2CCLK = fPCLK /512
+	//Tx/Rx Interrupt: 中断开关
+	//Interrupt pending flag: 中断欲发生时 的flag
+	//Transmit clock value: I2C-Bus transmit clock prescaler
+	//			I2C-Bus transmit clock frequency is determined by this 4-bit
+	//			prescaler value, according to the following formula:
+	//			Tx clock = I2CCLK/(I2CCON[3:0]+1)
+#define I2CSTAT0 	(*(volatile unsigned *)0xE1800004) //IIC status
+	//I2C控制状态寄存器
+	//Mode selection:  00 = Slave receive mode  01 = Slave transmit mode  10 = Master receive mode  11 = Master transmit mode
+	//Busy signal status START STOP condition: I2C-Bus busy signal status bit
+	//Serial output: I2C-bus data output 开关
+	//Arbitration status flag :仲裁状态标记
+	//Address-as-slave status flag: 标记从设备地址是否吻合
+	//Address zero status flag: 标记 当接收到的地址是0地址
+	//Last-received bit status flag 显示 收到的 最新一bit的数据 (这个位在接受数据过程中不断改变)
+#define I2CADD0  	(*(volatile unsigned *)0xE1800008) //IIC address
+	//Slave address寄存器:8位地址
+#define I2CDS0   	(*(volatile unsigned *)0xE180000C) //IIC data shift
+	//传输数据的寄存器:每次8bits数据
+#define I2CLC0   	(*(volatile unsigned *)0xE1800010) //IIC multi-master line control 
+	//sda线控制寄存器
+	//Filter enable: 当sda线工作在输入数据时,开filter避免由两个pclk时钟引发的glitch错误
+	//SDA output delay; 输出延迟选择
+初始化I2C
+// 配置引脚用于i2c功能
+GPD1CON |= 0x22;
+GPD1PUD |= 0x5;
+    // bit[0:3] = 0xf:Transmit clock value = IICCLK/(15+1)
+I2CCON0  = (1<<7)     // bit[7] = 1: Enable ACK的生成`
+	| (0<<6)     // bit[6] = 0: Prescaler IICCLK=PCLK/16
+	| (1<<5)     // bit[5] = 1: Enable interrupt (注意,这里的中断似乎不是VIC类中断,还是说是不是不需要用到中断???)
+	| (0xf);     // bit[0:3] = 0xf:Transmit clock value = IICCLK/(15+1)
+I2CSTAT0 = 0x10;     // Serial output bit[4] = 1: 使能接收和发送功能
+I2C写操作;
+//发送外部元器件的slave地址,让其核对,
+I2CDS0 = slave_addr; //把slave-address 写入 传输数据 的寄存器
+I2CSTAT0 = 0xf0;	// bit[7:6]: 主机发送模式
+			// bit[5]:发出start信号 开启发送机能 当中断flag为0时,通知硬件开始发送 I2CDS0 里的从机地址
+			// bit[4]:使能接收和发送功能
+while ((I2CCON0 & 0x10) == 0);	//检查是否发送完毕
+				//当数据发送完成,会升起 Interrupt pending flag,所以检测 Interrupt pending flag
+				//所以说,开中断后,中断是为这里服务的,不是为VIC类中断服务的
+				//有或者说,虽然开了中断,但只为上述用附加用途(检测发送是否完成),却因未注册中断处理函数,所以,不会发生VIC类中断
+while ((I2CSTAT0 & 0x1));	// 等待从机发来ACK
+				//Last-received bit status flag 会显示 收到的 最新一bit的数据 
+				//当检查收到1,表示收到ack
+//连续发两字节数据 前7bit器件内部地址后9bit对应数据内容的数据
+--发第一字节
+I2CDS0 = addr<<1 | ((data>>8) & 0x0001);
+I2CCON0 &= ~(1<<4);		// 清中断flag (清nterrupt pending flag).
+				// I2CSTAT0 start信号仍然为1时,清flag后,硬件自动发 新的1字节 内容
+while ((I2CCON0 & 0x10) == 0);	// 等待数据发送
+while ((I2CSTAT0 & 0x1));	// 等待从机发来ACK
+--发第二字节
+I2CDS0 = (data & 0x00FF);
+I2CCON0 &= ~(1<<4);		// 清中断flag
+while ((I2CCON0 & 0x10) == 0);	// 等待数据发送
+while ((I2CSTAT0 & 0x1));	// 等待从机发来ACK
+//关闭发送机能
+
+	// bit[5]: 发出p信号
+	// bit[4]: 使能tx/rx
+I2CSTAT0 = 0xd0;	// bit[7:6]: 主机发送模式
+			// bit[5]:发出stop信号 通知硬件不再发送 I2CDS0 里的从机地址 (即日后清中断flag也不会自动发新数据)
+			// bit[4]:使能接收和发送功能
+I2CCON0 &= ~(1<<4);	// 清中断flag
+//延时等待一段时间,以让硬件稳定
+int i=0;
+for(i=0; i<50; i++);
+I2S 音频数据传输串口协议:4线,串口输入I2SSDI, 串口输出I2SSDO, 左右通道选择时钟I2SLRCLK 串口传输时钟I2SSCLK 主设备产生这两个时钟
+以下例子里没有用到iis 的 DMA功能	
+#define IISCON  	(*(volatile unsigned int *)0xEEE30000)	//IIS Control
+	//I2S控制寄存器
+	//SW_RST: IIS s/w reset control
+	//FRXOFSTATUS: 记录 RX fifo 溢出中断状态
+	//FRXOFINTEN: RX fifo 溢出中断开关
+	//FTXSUR STATUS: Secondary TX FIFO_S under-run interrupt status
+	//FTXSURINTEN: Secondary TX FIFO_S Under-run Interrupt Enable
+	//FTXSEMPT: Secondary TX FIFO_S empty Status Indication
+	//FTXSFULL: Secondary TX FIFO_S full Status Indication
+	//TXSDMAPAUSE: Tx External DMA operation for secondary TX FIFIO_S pause command
+	//TXSDMACTIVE: Tx External DMA active for secondary TX FIFO_S
+	//FTXURSTATUS: Primary TX FIFOx under-run interrupt status
+	//FTXURINTEN: Primary TX FIFOx Under-run Interrupt Enable
+	//FTX2EMPT: Primary TX FIFO2 empty Status Indication
+	//FTX1EMPT: Primary TX FIFO1 empty Status Indication
+	//FTX2FULL: Primary TX FIFO2 full Status Indication
+	//FTX1FULL: Primary TX FIFO1 full Status Indication
+	//LRI: Left/Right channel clock indication
+	//FTX0EMPT; Primary Tx FIFO0 empty status indication.
+	//FRXEMPT: Rx FIFO empty status indication.
+	//FTX0FULL: Primary Tx FIFO0 full status indication.
+	//FRXFULL: Rx FIFO full status indication.
+	//TXDMAPAUSE: Tx DMA operation pause command for primary TX FIFOx.
+	//RXDMAPAUSE: Rx DMA operation pause command
+	//TXCHPAUSE: Tx channel operation pause command for primary TX FIFOx
+	//RXCHPAUSE: Rx channel operation pause command
+	//TXDMACTIVE: Tx DMA active for primary TX FIFOx
+	//RXDMACTIVE: Rx DMA active
+	//I2SACTIVE: IIS interface active (start operation).
+#define IISMOD  	(*(volatile unsigned int *)0xEEE30004)	//IIS Mode
+	//iis 模式设置 寄存器	
+#define IISFIC  	(*(volatile unsigned int *)0xEEE30008)	//IIS FIFO Control
+#define IISPSR  	(*(volatile unsigned int *)0xEEE3000C)	//IIS Prescaler
+	//IS Interface Clock Divider Control Register 主要设置iis 时钟分频器
+	//PSRAEN:激活Prescaler 开关
+	//PSVALA:Prescaler division value N.
+#define IISTXD		(*(volatile unsigned int *)0xEEE30010)	//IIS TXD DATA
+	//传输数据的寄存器
+#define IISRXD 		(*(volatile unsigned int *)0xEEE30014)	//IIS RXD DATA
+	//接受数据的寄存器
+#define IISFICS  	(*(volatile unsigned int *)0xEEE30018)	//IIS FIFO Control
+EPLL
+EPLL倍频后的时钟频率输出公式:FOUT = (MDIV+K/65536) X FIN / (PDIV X 2^SDIV )
+Fout = (0x43+0xbcee/65536)*24M / (3*2^3) = 80*24M/24 
+     = (0x43+0.7)*24M / (3*2^3) = 80*24M/24 
+     = 67.7Mhz
+#define EPLL_CON0  	(*(volatile unsigned int *)0xE010_0110)	
+	//EPLL控制器
+	//ENABLE: 激活控制器开关
+	//LOCKED: PLL locking 标记
+	//VSEL: VCO frequency range selection
+	//MDIV: PLL M divide 值
+	//PDIV: PLL P divide 值
+	//SDIV; PLL S divide 值
+#define EPLL_CON1  	(*(volatile unsigned int *)0xE010_0114)	
+	//K: PLL K value 值	
+#define AUDIO SUBSYSTEM CLK SRC  	(*(volatile unsigned int *)0xEEE10000)
+	//音频子系统所用的时钟源选择寄存器 
+使用步骤:
+初始化
+GPICON = 0x22222222; // 配置引脚用于i2s功能
+//设置时钟源
+EPLL_CON0 = 0xa8430303;	//MPLL_FOUT = 67.7Mhz
+			//ENABLE: 激活控制器
+			//LOCKED: PLL locking 标记
+			//VSEL; 置1
+			//MDIV; 1000011b = 0x43
+			//PDIV; 11b = 3
+			//SDIV: 11b = 3
+EPLL_CON1 = 0xbcee; 	//k: =0xbcee    
+CLK_SRC0 = 0x10001111;  //SCLK选择epll倍频后的fout,而非倍频前的fin 24MHz
+AUDIO SUBSYSTEM CLK SRC = 0x1;	//选择EPLL_fout时钟的mainclock(即pll倍频后未加入其他分频处理的)67.7MHZ为音频子系统所用的时钟源,
+				//CLKMUX_ASS: 选 FOUT_EPLL		
+				//MUXI2S_A: 00 = Main CLK
+// 设置i2s控制器
+N = 5;
+IISPSR = 1<<15 | N<<8;   //设置iis真正使用的时钟频率
+			 //Divider of IIS (67.7 -> 11.289Mhz)
+   			 // N + 1 = (67.7Mhz) / (256 * 44.1Khz) = 5.99
+   			 // IISCDCLK  11.289Mhz = 44.1K * 256fs
+  			 // IISSCLK	  1.4112Mhz = 44.1K * 32fs
+   			 // IISLRCLK   44.1Khz
+IISCON |= 1<<0 			//I2SACTIVE :active iis
+	| (unsigned)1<<31;	//不允许reset iis模块,其实就是,当iis的工作时钟已经稳定后,不允许iis参数的更改生效
+IISMOD = 1<<9  		//TXR: tx rx 可同时进行模式
+	| 0<<8 		//TXR: tx rx 可同时进行模式
+	| 1<<10;	//RCLKSRC: 选择 RCLK 时钟源为 I2SCLK
+传输数据
+while(1) //这样循环输出音频数据到wm8960音频解释器,解释器解释并放出音乐
+{
+	while((IISCON & (1<<8)) == (1<<8)); //检测tx fifo是否为空? 空表示可以写入数据IISTXD来发送数据
+	IISTXD = *(十六位数据的指针A);	// 每次发送2byte
+	A指向下个十六位数据
+)
+//iis里关于传输过程中的从设备与s5pv210的交互由硬件自动处理
+补充关于wm8960的设置(日后分析对应data sheet分析)
+void wm8960_init(void)
+{
+    // bit[7:1]: 0x1a
+    // bit[0]:0: write
+#define WM8960_DEVICE_ADDR		0x34
+    // 重置
+    iic_write(WM8960_DEVICE_ADDR, 0xf, 0x0);
+    // 设置电源
+	iic_write(WM8960_DEVICE_ADDR, 0x19, 1<<8 | 1<<7 | 1<<6);
+	iic_write(WM8960_DEVICE_ADDR, 0x1a, 1<<8 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3);
+	iic_write(WM8960_DEVICE_ADDR, 0x2F, 1<<3 | 1<<2);
+    // 设置时钟
+    iic_write(WM8960_DEVICE_ADDR, 0x4, 0x0);
+    // 设置ADC-DAC
+    iic_write(WM8960_DEVICE_ADDR, 0x5, 0x0);
+    // 设置audio interface
+    iic_write(WM8960_DEVICE_ADDR, 0x7, 0x2);
+    // 设置OUTPUTS
+    iic_write(WM8960_DEVICE_ADDR, 0x2, 0xFF | 0x100);
+    iic_write(WM8960_DEVICE_ADDR, 0x3, 0xFF | 0x100);
+    // 设置DAC VOLUME
+    iic_write(WM8960_DEVICE_ADDR, 0xa, 0xFF | 0x100);
+    iic_write(WM8960_DEVICE_ADDR, 0xb, 0xFF | 0x100);
+    // 设置mixer
+    iic_write(WM8960_DEVICE_ADDR, 0x22, 1<<8 | 1<<7);
+    iic_write(WM8960_DEVICE_ADDR, 0x25, 1<<8 | 1<<7);
+    return;
+}
+
+
+
+/*********************************** 19.lcd ********************************************/
+
+lcd基础:主要讨论主流 TFT lcd 架构
+信号针:
+VSYNC:垂直同步信号 代表一帧图案的开始,发出VSYNC时,跳到屏幕的左上方开始素描(即一帧图案的开始),VSYNC信号频率,代表帧频率,代表显示器频率
+HSYNC:水平同步信号 代表一行像素扫描开始,发出HSYNC时,跳到屏幕下一行最左边的像素点开始素描
+HCLK:像素时钟型号  VCLK(一个周期,输出一个像素数据)=HCLK/[(CLKVAL+1)*2]
+VD[23:0]: 24针数据线号
+VDEN:标示输出的有效像素数据段
+PWREN: 电源开关型号
+时序关系:
+VSPW:VS pulse width 
+VBPD:Vertical back porch
+VFPD:Vertical front porch
+HSPW:HS pulse width
+HFPD:HS Front Porch
+HBPD:Horizontal back porch
+--帧数据素描时序关系:
+VSYNC信号宽度:(VSPW+1)个HSYNC信号周期,VSYNC信号发生的宽度里,的(VSPW+1)行像素扫描为无效数据
+VSYNC信号开始时,跳到屏幕的最左上方开始素描,
+	VSYNC信号发生的宽度里,(VSPW+1)行像素扫描为无效数据,
+	VSYNC信号后,(VBPD+1)个HSYNC信号周期的数据无效,即(VBPD+1)行像素扫描为无效数据
+	然后的(LINEVAL+!)个HSYNC信号周期的数据有效,即(LINEVAL+1)行像素扫描为有效数据,即显示出(LINEVAL+1)行有效的像素图像
+	最后,(VFPD+1)个HSYNC信号周期的数据无效,即(VFPD+1)行像素扫描为无效数据,一帧的图像扫描结束
+新的VSYNC信号开始,预示新的一帧的扫描.
+--行数据扫描时序关系:
+从有效的行扫描分析,即从发生在(LINEVAL+!)个行扫描里举一个行扫描为例
+HSYNC信号宽度:(HSPW+1)个VCLK信号周期,HSYNC信号发生的宽度里,的(HSPW+1)个像素扫描为无效数据
+HSYNC信号开始时,下一行的最左方开始素描,
+	HSYNC信号发生的宽度里,(HSPW+1)个像素扫描为无效数据,这时,VDEN低电平
+	HSYNC信号后,(HBPD+1)个VCLK信号周期的数据无效,即(HBPD+1)个像素扫描为无效数据
+	然后.VDEN高电平的(HOZVAL+!)个VCLK信号周期的数据有效,即(HOZVAL+1)个像素扫描为有效数据,即显示出(HOZVAL+1)个有效的像素图像
+	最后,VDEN低电平,(HFPD+1)个VCLK信号周期的数据无效,即(HFPD+1)个像素扫描为无效数据,一行的像素扫描结束
+新的HSYNC信号开始,预示新的一行的扫描.
+DMA:
+处理好信号设置后便要告诉lcd控制器帧内存的地址
+lcd display 开始后,控制便会自动读取内存数据并输出到lcd屏幕
+DBI/DSI/DPI
+DBI: 即cpu的lcd控制器与lcd屏设备的通讯bus类型,也可以称MCU接口,既传输屏幕数据,也传输控制指令,传输 i80 格式的帧格式图像
+     MCU接口.因为最早是针对单片机的领域使用而得名,MCU-LCD接口的标准术语是Interface 80,因此在很多文档中用I80 来指MCU-LCD屏
+     MCU-LCD的设计之初只要考虑单片机的 内存较小,因此都是把显存内置在LCD模块内部.然后软件通过专门显示命令来更新显存,
+     因此MCU屏往往不能做得很大.同时显示更新速度也比RGB- LCD(即DPI)慢
+DPI: 即cpu的lcd控制器与lcd屏设备的通讯bus类型,只传输屏幕数据,传输 RGB 格式的帧格式图像,bus使用的的信号针口类型为上述过的信号针口
+     RGB-LCD的显存是由系统内存充当的,因此其大小只受限于系统内存的大小,这样 RGB-LCD可以做出较大尺寸,象现在4.3"只能算入门级
+DSI: 即cpu的lcd控制器与lcd屏设备的通讯bus类型,但是属于串口传输的总线,既传输屏幕数据,也传输控制指令.
+注意:i80(DBI)与RGB(DPI)是硬件上的协议区别,而yuv与RGB却是软件上像素点数据的编码区别
+ITU: 与摄像头有关
+s5pv210的lcd模块:
+含有5个window,对应5个独立的lcd通道,同一时间只能使用其中一条通道
+S5PV210 显示控制器有 5 个窗口,每个窗口有 3 个视频缓冲区,通过 WINCON0 寄存器 BUFSEL 选择哪一个,这在配置帧缓存地址时用到
+s70 lcd 屏:
+Note 1: DE/SYNC mode select. Normally pull high.
+	When select DE mode, MODE=”1”, VS and HS must pull high.
+	When select SYNC mode, MODE= ”0”, DE must be grounded.
+Note 2: When input 18 bits RGB data, the two low bits of R,G and B data must be
+	grounded.
+Note 3: Data shall be latched at the falling edge of DCLK.
+寄存器:
+//设置I/O寄存器lcd针口功能
+#define GPF0CON			(*(volatile unsigned long *)0xE0200120)
+#define GPF1CON			(*(volatile unsigned long *)0xE0200140)
+#define GPF2CON			(*(volatile unsigned long *)0xE0200160)
+#define GPF3CON			(*(volatile unsigned long *)0xE0200180)
+//设置I/O寄存器lcd背光针口功能
+#define GPD0CON			(*(volatile unsigned long *)0xE02000A0)
+#define GPD0DAT			(*(volatile unsigned long *)0xE02000A4)
+//时钟源的设置
+#define CLK_SRC1		(*(volatile unsigned long *)0xe0100204)
+	//FIMD_SEL: FIMD模块的时钟选择
+#define CLK_DIV1		(*(volatile unsigned long *)0xe0100304)
+	//FIMD_RATIO; DIVFIMD clock divider ratio,
+	//		SCLK_FIMD = MOUTFIMD / (FIMD_RATIO + 1)
+//输出源的控制寄存器,都选择FIMD?? FIMD是什么?
+#define DISPLAY_CONTROL	(*(volatile unsigned long *)0xe0107008)
+//lcd控制寄存器
+#define VIDCON0			(*(volatile unsigned long *)0xF8000000)
+	//DSI_EN MIPI DSI 开关 
+	//VIDOUT: lcd控制器输出的协议格式
+	//L1_DATA16: i80,第1通道 的输出协议格式下,的像素组成格式
+	//L0_DATA16: i80,第0通道 的输出协议格式下,的像素组成格式
+	//RGSPSEL: RGB 输出协议格式下 传输方式,并行/串行 (上述基础介绍只说了并行的,即一个VCLK周期,VD[0:23]信号同时传输组成一像素点数据)
+	//PNRMODE: 与使用或者不使用VIDCON3有关
+	//CLKVALUP: 时钟更新时的操作,是否开始1帧数据的传输
+	//CLKVAL_F: 即CLKVAL关乎lcd使用的时钟频率设置: VCLK = HCLK / (CLKVAL+1)
+	//VCLKFREE; Controls VCLK Free Run (Only valid at RGB IF(interface) mode).
+	//CLKDIR: 设置使用的时钟源 是不是被 CLKVAL_F 分频后的
+	//ENVID: 视频输出,和视频控制信号 立即启动 Enables/ disables video output and logic immediately.
+	//ENVID_F: Enables/ disables video output and logic at current frame end.
+#define VIDCON1			(*(volatile unsigned long *)0xF8000004)
+	//LINECNT: 记录 有效行扫描已扫描了的行数 的计数器 count from 0 to LINEVAL
+	//FSTATUS: 记录现在处于的FIELD状态,奇/偶FIELD
+	//FIXVCLK; VCLK运行的策略,当遇到数据下溢时
+	//IVCLK; 设置VCLK的有效极性,即数据在VCLK的上升沿/下降沿时传输有效
+	//IHSYNC: HSYNC输出极性:高电平,低电平 Specifies the HSYNC pulse polarity.
+	//IVSYNC: Specifies the VSYNC pulse polarity.
+	//IVDEN: Specifies the VDEN signal polarity.
+#define VIDCON2		(*(volatile unsigned long *)0xF8000008)
+	//RGB_SKIP_EN: RGB传输出错时跳过 的功能设置 仅限RGB并行模式
+	//RGB_DUMMY_LOC: RGB传输出错时仿制 的功能设置,仅限RGB串行模式,应该是把这个出错像素点用旁边的像素点数据拷贝一份代替
+	//RGB_ORDER_E: RGB(偶数行)输出的编码形式,就是一个像素数据中red green blue 数值谁先谁后的问题
+	//RGB_ORDER_o: RGB(奇数行)输出的编码形式,就是一个像素数据中red green blue 数值谁先谁后的问题
+	//TVFORMATSEL: 输出yuv数据格式的设置
+	//OrgYCbCr: yuv的编码类型
+	//YUVOrd: yuv的编码类型 关于 Chroma data 方向的
+	//WB_FRAME_SKIP: 跳帧率
+//window0 的寄存器
+#define WINCON0 		(*(volatile unsigned long *)0xF8000020)
+	//window1 设置寄存器
+	//BUFSTATUS_H: 缓存状态
+	//BUFSEL_H: Selects the Buffer set.
+	//LIMIT_ON: Enables CSC source limiter (for clamping xvYCC source).
+	//EQ709: Controls CSC parameter.
+	//nWide/Narrow: 关于yuv转RGB
+	//TRGSTATUS: Specifies the Trigger Status (read only).
+	//ENLOCAL_F: 数据接口方式 DMA / local path
+	//BUFSTATUS_L: Specifies the Buffer Status (read only).
+	//BUFSEL_L: Selects the Buffer set.
+	//BUFAUTOEN; Specifies the Double Buffer Auto control bit.
+	//BITSWP_F; Specifies the Bit swap control bit.   ???
+	//BYTSWP_F: Specifies the Byte swaps control bit.  ???
+	//HAWSWP_F: Specifies the Half-Word swap control bit.  ???
+	//WSWP_F: Specifies the Word swap control bit.  ???
+	//BUF_MODE: Selects the auto-buffering mode.   ???
+	//InRGB: Specifies the input color space of source image  yuv/RGB
+	//BURSTLEN: Selects the DMA Burst Maximum Length. 例如16 word–burst 16字分页 1字 等于 4 bytes
+	//BLD_PIX_F; Selects the blending category  ???
+	//BPPMODE_F; Bits Per Pixel (BPP) mode for Window image  例如 24bpp
+	//ALPHA_SEL_F: Selects the Alpha value.
+	//ENWIN_F; Enables/ disables video output and logic immediately.
+#define WINCON2 		(*(volatile unsigned long *)0xF8000028)
+	//window2 设置寄存器
+#define SHADOWCON 		(*(volatile unsigned long *)0xF8000034)
+	//W0_SHADOW_PROTECT: Protects to update window 0’s shadow register (xxx_F)
+	//		0 = Updates shadow register per frame
+	//		1 = Protects to update (update shadow register at next frame after ‘SHADOW_PROTECT’ turns to be 1’b0)
+	//C0_ENLOCAL_F: Enables Channel 0 Local Path.
+	//C0_EN_F: Enables Channel 0.
+	//CH0FISEL: Selects Channel 0’s channel.
+	//W0FISEL: Selects Window 0’s channel.
+#define VIDOSD0A 		(*(volatile unsigned long *)0xF8000040)
+	//Window 0 Position Control A Register
+	//OSD_LeftTopX_F: Specifies the horizontal screen coordinate for left top pixel of OSD image.
+	//OSD_LeftTopY_F: Specifies the vertical screen coordinate for left top pixel of OSD image
+#define VIDOSD0B 		(*(volatile unsigned long *)0xF8000044)
+	//Window 0 Position Control B Register
+	//OSD_LeftTopX_F: Specifies the horizontal screen coordinate for right bottom pixel of OSD image.
+	//OSD_LeftTopY_F: Specifies the vertical screen coordinate for right bottom pixel of OSD image.
+#define VIDOSD0C 		(*(volatile unsigned long *)0xF8000048)
+	//OSDSIZE; Specifies the Window Size
+//Frame Buffer Address 0/1 Register
+#define VIDW00ADD0B0 	(*(volatile unsigned long *)0xF80000A0)
+	//VBASEU_F: Specifies A [31:0] of the start address for Video frame buffer.
+#define VIDW00ADD1B0 	(*(volatile unsigned long *)0xF80000D0)
+	//VBASEL_F: Specifies A[31:0] of the end address for Video frame buffer
+	//	VBASEL = VBASEU + (PAGEWIDTH+OFFSIZE) x (LINEVAL+1)
+//Video Time Control 0/1/2 Register
+#define VIDTCON0 		(*(volatile unsigned long *)0xF8000010)
+	//VBPDE only for yuv
+	//VBPD
+	//VFPD
+	//VSPW
+#define VIDTCON1 		(*(volatile unsigned long *)0xF8000014)
+	//VFPDE	only for yuv
+	//HBPD
+	//HFPD
+	//HSPW
+#define VIDTCON2		(*(volatile unsigned long *)0xF8000018)
+	//LINEVAL: 有效行 对应着频幕的行数
+	//HOZVAL; 有效像素点 对应这频幕的列数
+#define HSPW 			(0)
+#define HBPD			(40 - 1)
+#define HFPD 			(5 - 1)
+#define VSPW			(0)
+#define VBPD 			(8 - 1)
+#define VFPD 			(8 - 1)
+// FB (Frame buffer)地址
+#define FB_ADDR			(0x23000000)
+#define ROW				(480)	//lcd的分辨率y部分,s70分辨率800X480,当设置错后,lcd显示错误或者不显示 
+#define COL				(800)	//lcd的分辨率x部分
+#define HOZVAL			(COL-1)
+#define LINEVAL			(ROW-1)
+重要片段:
+初始化:
+// 配置引脚用于LCD功能
+GPF0CON = 0x22222222;
+GPF1CON = 0x22222222;
+GPF2CON = 0x22222222;
+GPF3CON = 0x22222222;
+// 打开背光
+GPD0CON &= ~(0xf<<4);
+GPD0CON |= (1<<4);	//使用GPD0_1
+GPD0DAT |= (1<<1);
+//设置lcd控制器
+DISPLAY_CONTROL = 2<<0;   //使用FIMD模块的时钟输出源模块 RGB=FIMD I80=FIMD ITU=FIMD
+VIDCON0 &= ~( (3<<26)	//bit[26~28]:100 = WB interface and RGB interface 或 000 = RGB interface 总之使用RGB接口
+	|(1<<18)	//bit[18]:0 = RGB 并行
+	|(1<<2) ); 	//bit[2]: 0 = Selects the video clock source 选择时钟源为HCLK_DSYS=166MHz
+VIDCON0 |= ( (1<<0)	//bit[0]:当前帧结束后使能lcd控制器
+	|(1<<1) );	//bit[1]:使能lcd控制器   " 这两个使能一定要都加上,不然会失败 "
+VIDCON0 |= 4<<6 	//bit[6-13]:分频值 CLKVAL = 14, 即 VCLK = 166M/(4+1) = 30M
+			//假若分频值为 4, VCLK则为33MHZ左右 ,VCLK 大小 不限制
+	| 1<<4;		//bit[4]:选择需要分频
+//根据 s70 lcd屏设置
+VIDCON1 |= 1<<5 //VSYNC 反转 
+	| 1<<6;	//HSYNC 反转
+		//由于S70 lcd模块 据芯片说明书.pdf(p13) 时序图：VSYNC和HSYNC都是低脉冲		
+		//s5pv210芯片手册(p1207) 时序图：VSYNC和HSYNC都是高脉冲有效，所以需要反转
+		//另外默认:VCLK falling edge 有效
+// 设置时序
+VIDTCON0 = VBPD<<16 | VFPD<<8 | VSPW<<0;
+VIDTCON1 = HBPD<<16 | HFPD<<8 | HSPW<<0;
+// 设置长宽
+VIDTCON2 = (LINEVAL << 11) | (HOZVAL << 0);
+// 设置windows0 
+WINCON0 |= 1<<0;	//bit[0]:使能video output and logic
+			//默认 Data access method: DMA
+WINCON0 &= ~(0xf << 2);	//先清 (BPP) mode
+WINCON0 |= (0xB<<2) 	//再设 bit[2~5]:24bpp
+	| (1<<15);	//the Word swap Enable
+// 设置windows0的上下左右
+#define LeftTopX     0
+#define LeftTopY     0
+#define RightBotX   799		//关于设置戳口的大小的x轴,一般窗口大小要与屏幕的分辨率一致,才不至于显示出错
+#define RightBotY   479		//关于设置戳口的大小的y轴
+VIDOSD0A = (LeftTopX<<11) | (LeftTopY << 0);
+VIDOSD0B = (RightBotX<<11) | (RightBotY << 0);
+VIDOSD0C = (LINEVAL + 1) * (HOZVAL + 1);
+// 设置frame buffer的地址,因为使用DMA关系
+VIDW00ADD0B0 = FB_ADDR; //DMA buffer 始地址
+VIDW00ADD1B0 = (((HOZVAL + 1)*4 + 0) * (LINEVAL + 1)) & (0xffffff); //DMA buffer 止地址
+// 使能channel 0传输数据
+SHADOWCON = 0x1;	//注意,window与channel相对应 我们设置了window0,所以就使能channel0
+然后,硬件就会重复读取DMA里的内容显示到屏幕上
+调试源码过程;
+1, 不显示
+解决方法:由于原来是对应分辨率 480X272 ,现在改为 800X480 改 VIDTCON2,VIDOSD0A,VIDOSD0B,VIDOSD0C
+2,VCLK设置
+推荐设置30Mhz,原来11Mhz也正常运作
+3,关于 VIDTCON3 的31位 VSYNC Signal Output 的开关 但不管开/关 似乎没有什么影响
+VIDTCON3 = (0b1 << 31);	/* Enables VSYNC Signal Output */
+4,关于背光灯问题:
+发现控制 GPD0DAT 低电平时,并不会关背光,//为什么??
+lcd显示;
+根本就是把RGB数据写入对应的DMA内存里,
+(*(unsigned long *) (pi_addr)) = color; //pi_addr是对应像素点的DMA内存地址,color是RGB格式颜色数据:[16:23]red [8:15]green [0:7]blue
+
+
+
+/*********************************** 23.lcd_picture ********************************************/
+
+紧接上例:主要分析如何显示文字和图片
+画图:
+void lcd_draw_bmp(const unsigned char gImage_bmp[])
+{
+	int i, j;
+	unsigned char *p = (unsigned char *)gImage_bmp;
+	int blue, green, red;
+	int color;
+	// 图片大小480x270像素
+	for (i = 0; i < 270; i++)
+		for (j = 0; j < 480; j++)
+		{
+			blue  = *p++;
+			green = *p++;
+			red   = *p++;	
+			color = red << 16 | green << 8 | blue << 0;
+			lcd_draw_pixel(i, j, color);
+		}
+}
+其中 gImage_bmp 数列在 bmp.h 里,记录着图片数据,节选
+const unsigned char gImage_bmp[388800] = { /* 0X00,0X18,0XE0,0X01,0X0E,0X01,0X00,0X39, */
+0X65,0X59,0X53,0X69,0X5C,0X55,0X6C,0X5F,0X57,0X71,0X63,0X5A,0X6F,0X68,0X60,0X7C,
+0X74,0X6C,0X7F,0X7A,0X73,0X83,0X83,0X7D,0X8B,0X90,0X8E,0X94,0X99,0X97,0X9D,0XA2,
+0XA1,0XA3,0XA9,0XA8,0XA9,0XAE,0XAF,0XAD,0XB2,0XB3,0XB1,0XB6,0XB7,0XB1,0XBA,0XBA,
+0XB3,0XBB,0XBB,0XB6,0XBE,0XBD,0XB5,0XBD,0XBD,0XB3,0XBB,0XBB,0XB4,0XBC,0XBB,0XB3,
+0XBB,0XBB,0XB2,0XBA,0XBA,0XB4,0XBC,0XBB,0XB1,0XB9,0XB9,0XAD,0XB5,0XB5,0XA9,0XB3,
+0XB3,0XA7,0XB1,0XB1,0XA1,0XAD,0XAD,0XA2,0XAB,0XAB,0X9F,0XA8,0XA8,0X94,0XA0,0XA0,
+0X90,0X9D,0X9F,0X86,0X94,0X96,0X81,0X8F,0X91,0X7C,0X89,0X8B,0X6E,0X7A,0X7C,0X65,......
+画字符:
+#include "font_8x16.h"
+void lcd_draw_char(unsigned char c)
+{
+	// 必须是静态变量
+	static int x = 0;	// 第几列
+	static int y = 0;	// 第几行
+	int i,j;
+	unsigned char line_dots;
+	// 获得字模
+	unsigned char *char_dots = (unsigned char *) (fontdata_8x16 + c * 16);
+	// 是否需要回车换行
+	if (c == '\n')
+	{
+		y += 16;
+		if (y > ROW)
+			y = 0;
+		return ;
+	}
+	else if (c == '\r')
+	{
+		x = 0;
+		return;
+	}
+	for (i = 0; i < 16; i++)
+	{
+		line_dots = char_dots[i];
+		for (j = 0; j < 8; j++)
+		{
+			// 为1,则描蓝点
+			if (line_dots & (0x80 >> j))
+			{
+				lcd_draw_pixel(y+i, x+j, 0xff0000);
+			}
+		}
+	}
+	// 光标移动到下一个8*16的位置
+	x += 8;
+	if (x > COL)
+	{
+		x = 0;
+		y += 16;
+		if (y > ROW)
+			y = 0;
+	}
+}
+重点:字符的显示是使用 fontdata_8x16 字符模块的,而不是用函数计算的
+
+
+
+
+
+
+
+
+
+
+
+

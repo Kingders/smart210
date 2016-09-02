@@ -1,0 +1,4 @@
+直接运行
+sudo /home/kingders/smart210/tools/minitools/minitools/start.sh		//失败
+需要进入到minitools文件夹,然后
+sudo ./start.sh 	//才成功

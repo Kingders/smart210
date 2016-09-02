@@ -1,0 +1,281 @@
+/********************************* git ***************************************/
+我的github帐号：
+nane: kingders
+email: 418128064@qq.com
+password:362~~~~~~~~~~~1q
+
+
+安装：
+sudo apt-get install git
+
+建立一个软件版本库：
+mkdir learngit
+cd learngit			//一定要cd到当前仓库目录执行一切git操作
+pwd				//显示当前工作路径
+/home/kl/learngit
+git init			//通过git init命令把这个目录变成Git可以管理的仓库
+				//当前目录下多了一个.git的目录，（隐藏目录， ctrl+h可见）这个目录是Git来跟踪管理版本库的，
+				//没事千万不要手动修改这个目录里面的文件，不然改乱了，就把Git仓库给破坏了。
+				//也不一定必须在空目录下创建Git仓库，选择一个已经有东西的目录也是可以的。
+				//不过，不建议你使用自己正在开发的公司项目来学习Git，否则造成的一切后果概不负责。
+
+
+
+
+把文件添加到版本库
+//首先这里再明确一下，所有的版本控制系统，其实只能跟踪文本文件的改动，比如TXT文件，网页，所有的程序代码等等，
+//Git也不例外。版本控制系统可以告诉你每次的改动，比如在第5行加了一个单词“Linux”，在第8行删了一个单词“Windows”。
+//而图片、视频这些二进制文件，虽然也能由版本控制系统管理，但没法跟踪文件的变化，只能把二进制文件每次改动串起来，
+//也就是只知道图片从100KB改成了120KB，但到底改了啥，版本控制系统不知道，也没法知道。
+//不幸的是，Microsoft的Word格式是二进制格式，因此，版本控制系统是没法跟踪Word文件的改动的，
+//如果要真正使用版本控制系统，就要以纯文本方式编写文件。
+//因为文本是有编码的，比如中文有常用的GBK编码，日文有Shift_JIS编码，
+//如果没有历史遗留问题，强烈建议使用标准的UTF-8编码，所有语言使用同一种编码，既没有冲突，又被所有平台所支持。
+随便建立一文件 ooo
+git add ooo	//执行 添加文件 命令，没有任何显示，这就对了，Unix的哲学是“没有消息就是好消息”，说明添加成功。
+git commit -m "i wrote a new file called ooo"	//告诉Git，把文件提交到仓库
+						//git commit命令，-m后面输入的是本次提交的说明，可以输入任意内容
+出现问题:提示输入git帐号登陆，因为未登录git
+git config --global user.email "418128064@qq.com"
+git config --global user.name "kingders"
+再次git commit 得到log：
+[master （根提交） bfb3ebc] i wrote a new file called ooo
+ 1 file changed, 1 insertion(+)
+ create mode 100644 ooo
+//为什么Git添加文件需要add，commit一共两步呢？因为commit可以一次提交很多文件，所以你可以多次add不同的文件，
+//$ git add file1.txt
+//$ git add file2.txt file3.txt
+//$ git commit -m "add 3 files."
+
+
+
+修改库文件及观察git的跟踪状态：
+修改 ooo 文件，然后
+git status	//得到log：
+位于分支 master
+尚未暂存以备提交的变更：
+  （使用 "git add <文件>..." 更新要提交的内容）
+  （使用 "git checkout -- <文件>..." 丢弃工作区的改动）
+	修改:         ooo
+未跟踪的文件:
+  （使用 "git add <文件>..." 以包含要提交的内容）
+	ooo~
+修改尚未加入提交（使用 "git add" 和/或 "git commit -a"）
+//git status命令可以让我们时刻掌握仓库当前的状态，上面的命令告诉我们，readme.txt被修改过了，但还没有准备提交的修改
+git diff ooo		//得到log：
+diff --git a/ooo b/ooo
+index 9a41347..4c4dadc 100644
+--- a/ooo
++++ b/ooo
+@@ -1 +1,3 @@
+ 你没你没模拟灭
++范德萨发的散发的感情还给我俄国人vsfgf
++dagdsadgdgvgf
+//git diff顾名思义就是查看difference，显示的格式正是Unix通用的diff格式，可以从上面的命令输出看到 更改文件的具体内容细节
+然后我们git add 后，不急于git commit 先git status 看当前状态
+git add ooo
+git status	//得到log:
+位于分支 master
+要提交的变更：
+  （使用 "git reset HEAD <文件>..." 以取消暂存）
+	修改:         ooo
+未跟踪的文件:
+  （使用 "git add <文件>..." 以包含要提交的内容）
+	ooo~
+//git status告诉我们，将要被提交的修改包括readme.txt，下一步，就可以放心地提交了
+git commit -m "changed ooo"  //得到log：
+[master 11b02a2] changed ooo
+ 1 file changed, 2 insertions(+)
+提交后再 git status 得到log：
+位于分支 master
+未跟踪的文件:
+  （使用 "git add <文件>..." 以包含要提交的内容）
+	ooo~
+提交为空，但是存在尚未跟踪的文件（使用 "git add" 建立跟踪）
+//Git告诉我们当前没有需要提交的修改，而且，工作目录是干净（working directory clean）的。
+
+
+
+
+回退到以前版本 	转回到新版本
+git log		//可以查看历史上提交 git commit 记录。	 得到log：
+commit 11b02a235b831abe69842eec39653bf9beada807
+Author: kingders <418128064@qq.com>
+Date:   Thu Sep 1 15:42:55 2016 +0800
+    changed ooo
+commit bfb3ebce864a557392b653786492f7618f2d31a8
+Author: kingders <418128064@qq.com>
+Date:   Thu Sep 1 15:23:10 2016 +0800
+    i wrote a new file called ooo	
+如果觉得log太多，不好查看，有简约凤的 git log
+git log --pretty=oneline	//得到log：
+11b02a235b831abe69842eec39653bf9beada807 changed ooo
+bfb3ebce864a557392b653786492f7618f2d31a8 i wrote a new file called ooo
+//需要友情提示的是，你看到的一大串类似bfb3ebce864a557392b653786492f7618f2d31a8的是commit id（版本号）
+//是一个SHA1计算出来的一个非常大的数字，用十六进制表示
+//因为Git是分布式的版本控制系统，后面我们还要研究多人在同一个版本库里工作，如果大家都用简单的版本号，那肯定就冲突了。
+回退上一个版本：
+git reset --hard HEAD^		//得到log
+HEAD 现在位于 bfb3ebc i wrote a new file called ooo
+//在Git中，用HEAD表示当前版本，也就是最新的提交。
+//上一个版本就是HEAD^，上上一个版本就是HEAD^^，当然往上100个版本写100个^比较容易数不过来，所以写成HEAD~100。
+打开 ooo 发现内容变回上次的
+这时，我们再 git log 看当前的记录 得到log：
+Author: kingders <418128064@qq.com>
+Date:   Thu Sep 1 15:23:10 2016 +0800
+    i wrote a new file called ooo
+//最新的那个版本append GPL已经看不到了
+那么如果又想转回新的版本，这样做：
+如果终端未关闭，看到之前 git log 显示的新版本的版本号 11b02a235b831abe69842eec39653bf9beada807 changed ooo
+git reset --hard 11b02a23	//得到log：
+HEAD 现在位于 11b02a2 changed ooo
+打开 ooo 发现内容变回 新版的
+//版本号没必要写全，前几位就可以了，Git会自动去找。当然也不能只写前一两位，因为Git可能会找到多个版本号，就无法确定是哪一个了。
+//Git的版本回退速度非常快，因为Git在内部有个指向当前版本的HEAD指针，当你回退版本的时候，Git仅仅是把HEAD从指向 changed ooo
+//改为指向 i wrote a new file called ooo,然后顺便把工作区的文件更新了。所以你让HEAD指向哪个版本号，你就把当前版本定位在哪
+另一种方法：假若没有途经看到新版的完整版本号，因为回复旧版后git log不显示新版版本id，
+git reflog 	//可以查看版本变迁过程！！	得到log
+bfb3ebc HEAD@{0}: reset: moving to HEAD^				//第三次回到旧版本
+11b02a2 HEAD@{1}: commit: changed ooo					//第二次上交旧的新版本
+bfb3ebc HEAD@{2}: commit (initial): i wrote a new file called ooo	//第一次上交旧版本
+//前面的号码是当时版本变迁后，所身处的版本号的 前几个位，
+看到 commit: changed ooo 即提交 changed ooo 后所处版本，也就是我们寻求的新版本，然后
+git reset --hard 11b02a2	//得到log：
+HEAD 现在位于 11b02a2 changed ooo
+
+
+
+
+工作区和暂存区
+//learngit文件夹就是一个工作区,
+//工作区有一个隐藏目录.git，这个不算工作区，而是Git的版本库。
+//Git的版本库里存了很多东西，其中最重要的就是称为stage（或者叫index）的暂存区
+//Git为我们自动创建的第一个分支master，以及指向master的一个指针叫HEAD。
+//git add把文件添加进去，实际上就是把文件修改添加到暂存区
+//git commit提交更改，实际上就是把暂存区的所有内容提交到当前分支
+//因为我们创建Git版本库时，Git自动为我们创建了唯一一个master分支，所以，现在，git commit就是往master分支上提交更改。
+//Git比其他版本控制系统设计得优秀，因为Git跟踪并管理的是修改，而非文件
+例如：第一次修改 -> git add -> 第二次修改 -> git add -> git commit
+因为只把第一次修改放到暂存区，所以结果是打开提交的文件发现有第二次修改的内容，
+但是，做一次回退和转回最新版本的操作后，打开文件发现只有第一次修改的内容，
+//换句话说：
+//git add 添加了修改痕迹
+//git commit 保存了修改痕迹，但不会更新文件
+//版本的转移是根据修改痕迹来更新文件的
+git checkout -- ooo	//不管你是否修改了文件，而且save了，但没有git add，还是说已经git add了
+			//只要还没有git commit，这命令会把文件恢复到当前版本的内容
+git reset HEAD ooo	//commit 前，你已git add 修改痕迹到暂存区，但你发现有错，这命令会清空暂存区，但不会更新文件，
+			//即文件回到了，修改了但还没有git add 前的状态
+
+
+删除：
+新建一个 bbb 文件，add和commit了
+rm bbb
+git checkout -- bbb	//还原了bbb
+严厉的删除：
+git rm test.txt		
+git commit -m "remove test.txt"
+//git checkout -- bbb log表示：error: pathspec 'bbb' did not match any file(s) known to git.
+//然而回到有 bbb 的版本号，，，又可以还原bbb 
+//所以 git checkout 其实是用版本库里的版本替换工作区的版本，无论工作区是修改还是删除，都可以“一键还原”。
+
+
+
+远程仓库--创建SSH Key
+//远程仓库 就是备份自己的代码到网络，以防万一
+$ ssh-keygen -t rsa -C "418128064@qq.com"	//ssh key 与机器相连，所以同一email，不同机子的ssh key 不一样
+Generating public/private rsa key pair.
+Enter file in which to save the key (/home/kl/.ssh/id_rsa): /home/kl/ssh
+Enter passphrase (empty for no passphrase): 
+Enter same passphrase again: 
+Your identification has been saved in /home/kl/ssh.	//可以不填，直接回车
+Your public key has been saved in /home/kl/ssh.pub.
+The key fingerprint is:
+36:1a:e1:5c:9d:13:7b:ce:0c:6f:72:b8:a9:b7:8a:0c 418128064@qq.com
+The key's randomart image is:
++--[ RSA 2048]----+
+|          .      |
+|         . +     |
+|      . . * .    |
+|     o o   X     |
+|      + S o B    |
+|       + . *     |
+|    E .   o      |
+|     o . ..      |
+|      o oo..     |
++-----------------+
+在/home/kl目录下得到ssh文件（私钥），ssh.pub文件（公钥）
+登陆GitHub，打开“Account settings”，“SSH Keys”页面
+点“Add SSH Key”，填上任意Title，在Key文本框里粘贴id_rsa.pub文件的全部内容后，点“Add Key”，你就应该看到已经添加的Key
+
+
+
+添加远程库：
+登陆GitHub，然后，在右上角找到“Create a new repo”按钮，创建一个新的仓库
+在Repository name填入learngit，其他保持默认设置，点击“Create repository”按钮，就成功地创建了一个新的Git仓库
+git remote add origin git@github.com:Kingders/learngit.git //在本地库learngit作为当前工作目录执行此命令，关联本地与远程仓库（通过ssh协议）
+git push -u origin master		//提交本地仓库到远程库
+问题
+由于误操作，ssh的公钥和私钥不再主目录的.ssh下。拷回去，并更名为：id_rsa（私钥）和id_rsa.pub（公钥）
+由于误操作，git remote add origin git@github.com:xxxx/learngit.git	//写错
+当，git push -u origin master 显示ssh钥匙对不上
+需要先：git remote rm origin	//取消关联
+然后再：git remote add origin git@github.com:Kingders/learngit.git	//重新正确关联
+最后再：git remote rm origin	//成功	得到log参考：
+Counting objects: 13, done.
+Delta compression using up to 4 threads.
+Compressing objects: 100% (8/8), done.
+Writing objects: 100% (13/13), 1.03 KiB | 0 bytes/s, done.
+Total 13 (delta 2), reused 0 (delta 0)
+remote: Resolving deltas: 100% (2/2), done.
+To git@github.com:Kingders/learngit.git
+ * [new branch]      master -> master
+分支 master 设置为跟踪来自 origin 的远程分支 master。
+//由于远程库是空的，我们第一次推送master分支时，加上了-u参数，Git不但会把本地的master分支内容推送的远程新的master分支，
+//还会把本地的master分支和远程的master分支关联起来，在以后的推送或者拉取时就可以简化命令。	
+//推送成功后，可以立刻在GitHub页面中看到远程库的内容已经和本地一模一样：
+git push origin master		//从现在起，只要本地作了提交git commit，就可以通过此命令：把本地master分支的最新修改推送至GitHub
+
+
+
+SSH警告
+//当你第一次使用Git的clone或者push命令连接GitHub时，会得到一个警告：
+The authenticity of host 'github.com (xx.xx.xx.xx)' can't be established.
+RSA key fingerprint is xx.xx.xx.xx.xx.
+Are you sure you want to continue connecting (yes/no)?
+//这是因为Git使用SSH连接，而SSH连接在第一次验证GitHub服务器的Key时，需要你确认GitHub的Key的指纹信息是否真的来自GitHub的服务器，输入yes回车即可。
+//Git会输出一个警告，告诉你已经把GitHub的Key添加到本机的一个信任列表里了：
+Warning: Permanently added 'github.com' (RSA) to the list of known hosts.
+//这个警告只会出现一次，后面的操作就不会有任何警告了。
+//如果实在担心有人冒充GitHub服务器，输入yes前可以对照GitHub的RSA Key的指纹信息是否与SSH连接给出的一致。
+
+
+
+从远程端克隆库下来，即下载：
+git clone  git@github.com:Kingders/123456.git	//不用比对ssh钥匙，直接把作为git仓库的 123456 的文件夹及其内容 下载到当前工作目录
+						//可以下载用户的仓库，不只是自己
+
+
+
+
+分支
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

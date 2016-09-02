@@ -1,0 +1,254 @@
+/********************************************************************/
+安装卸载:
+	查看符合关键字的已安装文件:  dpkg --get-selections | grep XXX
+	查看软件安装路径:  dpkg -L 软件名 
+	查看软件安装信息:  dpkg -s xxx
+	查看所有已安装的库或软件(但似乎不能完全列全): dpkg -l
+	查看验证xxx是否已装(例如验证opencv):apt-cache search xxx  
+	完全卸载软件：
+		先dpkg --list 
+		查到名字xxx后，完全删除：sudo apt-get --purge remove xxx
+		查到名字xxx后，保留配置文件仅删除安装包：sudo apt-get remove xxx
+	删除 apt-get remove xxx //卸载当前版本xxx
+	     apt-get autoremove //卸载残留
+/********************************************************************/
+
+
+/********************************************************************/
+查看cpu实用率:
+	1,sudo apt-get install htop
+	2,htop命令
+
+/********************************************************************/
+
+
+/********************************************************************/
+各种查找技巧:
+	1,在一个父目录里,寻找符合关键字的所有文件路径: 
+	  例如在目录/usr下及旗下所有子目录,及子目录下的子目录...,寻找所有含关键字 xxx 的文件或文件夹内容路径,并显示
+		find /usr -name *xxx*
+	2,通用的搜索命令:Ctrl+f
+/********************************************************************/
+
+
+/********************************************************************/
+tftp:
+	1、安装软件包:	sudo apt-get install tftpd tftp xinetd
+	2、建立配置文件: 在/etc/xinetd.d/下建立一个配置文件tftp
+		sudo vi /etc/xinetd.d/tftp
+		内容如下
+		service tftp  
+		{  
+			socket_type = dgram  
+			protocol = udp  
+			wait = yes  
+			user = root  
+			server = /usr/sbin/in.tftpd  
+			server_args = -s /tftpboot  
+			disable = no  
+			per_source = 11  
+			cps = 100 2  
+			flags = IPv4  
+		}  
+	3、建立tftp服务文件目录:	在上面的配置中有server_args = -s /tftpboot，其中/tftpboot这个目录就是上传文件与下载文件的位置。
+		sudo mkdir /tftpboot          --创建/tftpboot目录
+		sudo chmod 777 /tftpboot -R   --设置权限为777
+	4、重新启动tftp服务
+		sudo /etc/init.d/xinetd restart  --重启tftp服务器
+	5、测试
+		sudo netstat -a | grep tftp      --查看是否启动成功，可以看到udp 0 0 *:tftp *:*
+
+/********************************************************************/
+
+
+/********************************************************************/
+压缩解压缩:
+	打包rar: rar a FileName.rar DirName
+	解压rar: rar x FileName.rar
+		tar -jvxf ../glibc-linuxthreads-2.5.tar.bz2 把上一级目录里的压缩文件glibc-linuxthreads-2.5.tar.bz2解压到当前文件夹里.
+		tar -jvxf glibc-2.9.tar.bz2 解压文件glibc-2.9.tar.bz2到当前文件夹
+	tar命令参数详细
+		-c 创建.tar格式的文件
+		-x 解开.tar格式的文件
+		-f 使用归档文件
+		-v 显示详细信息
+		-t 查看包内文件
+		-j 使用baip2程序
+		-z 使用gzip程序
+		-p 打包时保留文件及目录的权限
+		-P 打包时保留文件及目录的绝对路径
+		-C 释放的目的地
+		例子 tar -zxvf aaa.gz -C /var/local/user  指定目录 -C 解压到/var/local/user下
+		参数前是否需要"-"符号,没有区别。这都是选择参数，先后顺序一般没有影响但是
+		如果使用  tar -***  包名
+			注意别把f参数放到前面去就可以了，要加f参数必须在最后。
+		使用  tar  ***  压缩包名  
+			这样的格式就没关系了	
+/********************************************************************/
+
+
+/********************************************************************/
+其他:
+	下载lofter版权图:
+		1,在图片页查看网页源码
+		2,Ctrl+f调出搜索工具栏搜img src
+		3,旁边的bigimgsrc后的网址有可能为原始大图链接
+	快速切换:  Ait+tab
+	查看所有(包括后台)进程痕迹:  ps -AFL 当rss段不为0时,进程是活动的,否则是killed的
+	终止进程: kill -9 pid号码
+	查看历史命令:history
+	终端不限行信息输出设置: 终端->右键->profiles->preferences->Scrolling->Unlimited
+	su 时,出现su: Authentication failure
+		$ sudo passwd root
+		Enter new UNIX password:
+		Retype new UNIX password:
+		passwd: password updated successfully
+	这时su回复正常.
+	关于gedit中文乱码问参考:http://blog.csdn.net/kang99827765/article/details/51426855  //dconf-editor,比gconf-editor跟新
+		编码加入了GB18030
+/********************************************************************/
+
+/********************************************************************/
+网络:
+	查看ip ifconfig
+	设置有线以太网卡静态ip sudo ifconfig eth0 192.168.1.253 netmask 255.255.255.0
+ 
+/********************************************************************/
+
+
+/********************************************************************/
+vim:(执行在命令模式下)
+	撤销 u
+	反撤销 Ctrl+r
+	向上查找 ? xxx (enter键触发) 按N查找再上一个匹配
+	向上查找 / xxx (enter键触发) 按n查找再上一个匹配
+/********************************************************************/
+
+
+/********************************************************************/
+权限与用户:
+	转root用户: sudo su
+	退出root用户: Ctrl+d
+/********************************************************************/
+
+
+/********************************************************************/
+gcc:
+	1,编译: gcc xxx.c -o XX
+	2,运行: ./xx
+	3,查看c++默认搜索路径: `g++ -print-prog-name=cc1plus` -v
+	4,查看c默认搜索路径: `gcc -print-prog-name=cc1` -v
+	5,添加.h默认搜索路径例子:(在/etc/profile文件最后添加) export C_INCLUDE_PATH="/usr/include/gtk-2.0:/usr/include/glib-2.0" (":"号隔开多条路径)
+	6,一次性添加对应路径到默认搜索路径的编译行为指令: gcc -o xxx $(pkg-config --cflags --libs cairo) xxx.c (这里解决当前默认路径搜不出#include<cairo.h>) 
+	7,make 与 make install 区别,make生成执行文件, make install复制执行文件到系统默认路径,这样可以不论身处任意路径也能执行执行	
+/********************************************************************/
+
+
+/********************************************************************/
+gtk可视程序编译:
+	编译(添加了一次性路径): gcc `pkg-config --cflags gtk+-2.0` -o server server.c `pkg-config --libs gtk+-2.0`
+/********************************************************************/
+
+
+/********************************************************************/
+webcam相关:
+	motion(网络动作监控): 
+		安装 sudo apt-get install motion
+		执行 sudo motion
+		测试运作:本地浏览器打开localhost:8081
+		设置参数:本地浏览器打开localhost:8080 
+                暂时火狐浏览器可远程使用例如:火狐上:ip:8081可以测试运作.
+		motion配置文件/etc/motion/motion.conf
+	cheese(普通摄像头软件): 
+		安装 sudo apt-get install cheese 
+		执行 cheese 
+/********************************************************************/
+
+
+/********************************************************************/
+opencv:
+	安装:http://www.cnblogs.com/emouse/archive/2013/02/22/2922940.html
+/********************************************************************/
+
+
+/********************************************************************/
+硬件设备及驱动:
+	查看硬件总线:lsusb
+/********************************************************************/
+
+
+/********************************************************************/
+shadowsocks与翻墙:
+	安装,配置,启动:
+		1,sudo apt-get install python-pip python-gevent
+		2,pip install shadowsocks
+		3,sudo vim /etc/shadowsocks.json
+		4,(shadowsocks.json文件内容):
+			{
+			"server":"vip3-us2-188.ssfq.info",
+			"server_port":12545,
+			"local_port":1080,
+			"password":"362951847",
+			"timeout":300,
+			"method":"rc4-md5"
+			}
+		5,客户端后台运行:sudo sslocal -c /etc/shadowsocks.json -d start
+		  客户端后台关闭:sudo sslocal -c /etc/shadowsocks.json -d stop
+                  客户端前台运行:sslocal -c /etc/shadowsocks.json
+		  服务端后台运行:sudo ssserver -c /etc/shadowsocks.json -d start
+		  服务端后台结束:sudo ssserver -c /etc/shadowsocks.json -d stop
+		  服务端前台运行:ssserver -c /etc/shadowsocks.json
+		4,开机自运行:
+		  	首先新建一个本地脚本文件:sudo vim /usr/local/lib/python2.7/dist-packages/shadowsocks/shadowsocks.sh
+			(shadowsocks.sh文件内容):
+				#！/bin/bash
+				#shadowsocks.sh
+				sslocal -c /etc/shadowsocks.json -d start
+			编辑启动文件 sudo vim /etc/rc.local  
+			-> 在exit0上面一行添加sudo sh /usr/local/lib/python2.7/dist-packages/shadowsocks/shadowsocks.sh  
+			-> 保存完成，现在每次开机启动后，shadowsocks服务就会自动启动啦！
+
+	firefox:
+		1,前提是shadowsocks客服端(前后台均可以)已启动
+		2,下载foxy proxy插件
+		3,打开浏览器代理:
+		  方法一,修改现有的proxy:foxy proxy窗->proxies窗->双击其中一条proxy->proxy detail窗->选manual proxy configuration
+		         ->host or ip address: 127.0.0.1 ->port 1080 -> 选socks proxy socks v5 -> ok 
+		         -> select mode: use proxies based on their pre-defined patterns and priorities 
+		                         (or) use proxy "default" for all urls 
+		         -> close ->即可登陆google!!
+  	          方法二,新增一条proxy(详情日后再探讨)
+		4,关闭浏览器代理:foxy proxy窗 -> select mode: completely fisable foxyproxy -> close
+	错误处理:
+		1,一般错误为,主机shadoesocks主机节点出问题,所以完全配置好也上不了网,解决方法:
+			关闭shadowsocks:sudo sslocal -c /etc/shadowsocks.json -d stop			
+			换节点:(换shadowsocks.json文件的"server"项)可选择的有:
+				美服:"vip3-us2-188.ssfq.info",
+				     "vip3-us1-108.ssfq.info",
+				     "vip3-us3-145.ssfq.info",
+				     "vip3-us4-97.ssfq.info",
+				     "vip3-us5-186.ssfq.info",
+				日服:"vip3-jp1-161.ssfq.info",
+				     "vip3-jp2-108.ssfq.info",
+				新加坡服:"vip3-sgp1-178.ssfq.info",
+				香港服(流量双倍算,慎用):"vip3-hk1-191.ssfq.info",
+			重启shadowsocks:sudo sslocal -c /etc/shadowsocks.json -d start
+		             	
+/********************************************************************/
+
+
+/********************************************************************/
+wps:
+	文件修改后标题栏会有*号标记,save后自动取消标记	
+	excel:
+		单元格内换行方法:硬回车Alt+Enter
+/********************************************************************/
+
+
+
+/********************************************************************/
+GNU awk
+	1,安装:
+		在"http://nl.archive.ubuntu.com/ubuntu/pool/main/g/gawk"里选择合适版本下载例如:gawk_4.0.1+dfsg-2.1ubuntu2_amd64.deb
+		朱安装 sudo dpkg -i gawk_4.0.1+dfsg-2.1ubuntu2_amd64.deb 
+/********************************************************************/

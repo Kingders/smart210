@@ -1,0 +1,1102 @@
+下载内核:
+ wget https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.46.tar.xz 
+
+
+/**************************** 裁剪 *********************************/
+arch/arm/只留下的mach-xx为mach-s5pv210,
+且arch/arm/Kconfig留下:
+# add by huang
+source "arch/arm/plat-samsung/Kconfig"
+source "arch/arm/mach-s5pv210/Kconfig"
+
+/**************************** etc/fstab *********************************/
+这个文件的全路径是/etc/fstab。它只是一个文本文件，你能够用你喜欢的编辑器打开它，
+但是必须是root用户才能编辑它。同时fsck、mount、umount的等命令都利用该程序。
+具体来说：用fstab可以自动挂载各种文件系统格式的硬盘、分区、可移动设备和远程设备等。
+对于Windows与arch双操作系统用户，用fstab挂载FAT格式和NTFS格式的分区，可以在Linux中共享windows系统下的资源。
+
+
+
+fstab文件示例
+现在让我们看一下一个典型的fstab文件：
+
+# <file system><dir><type><options><dump><pass>
+none                   /dev/pts      devpts    defaults                0      0
+none                   /dev/shm      tmpfs     defaults                0      0
+
+/dev/cdrom             /media/cd     iso9660   ro,user,noauto,unhide   0      0
+/dev/dvd               /media/dvd    udf       ro,user,noauto,unhide   0      0
+/dev/fd0               /media/fl     auto      user,noauto             0      0
+
+/dev/hda1              swap          swap      defaults                0      0
+/dev/hda4              /             ext3      defaults                0      1
+/dev/hda3              /home         xfs       rw,suid,exec,auto,nouser,async 0      2
+</pass></dump></options></type></dir></file>
+
+fstab详解
+让我们对fstab的用法进行一个详细的了解。一个典型的entry有下面的fields (fields用空格或tab分开):
+<file system><dir><type><options><dump><pass></pass></dump></options></type></dir></file>
+
+	<file systems> 不是我们通常理解的文件系统，而是指设备（硬盘及其分区，DVD光驱等）。它告知我们设备（分区）的名字，
+	这是你在命令行中挂载（mount）、卸载（umount）设备时要用到的。
+	so one should substitute for this entry the device name, remote partition, or similar. </file>
+	注意: 除了直接用设备（分区）名字，你也可以用UUID或卷名。格式 LABEL= or UUID=<uuid>。
+	例如, `LABEL=Boot' or `UUID=3e6be9de-8139-11d1-9106-a43f08d823a6'. </uuid>
+
+	<dir>告诉我们设备挂载到哪里。
+
+	<type> 指挂载设备或分区为何种文件系统类型（例如：ext2, ext3, reiserfs, xfs, jfs, smbfs, iso9660, vfat, ntfs, swap等）。 
+	archLinux支持许多文件系统。 要得到一个完整的支持名单查找mount man-page。
+	典型 的名字包括这些：ext2, ext3, reiserfs, xfs, jfs, smbfs, iso9660, vfat, ntfs, 
+	swap和auto, 'auto' 不是一个文件系统，而是让mount命令自动判断文件类型，
+	特别对于可移动设备，软盘，DVD驱动器，这样做是很有必要的，因为可能每次挂载的文件类型不一致。 </type>
+
+	<options>，选项，这部分是最有用的设置！！！ </options>
+	它能使你所挂载的设备在开机时自动加载、使中文显示不出现乱码、限制对挂载分区读写权限。
+	它是与mount命令的用法相关的，要想得到一个完整的列表，参考mount manpage.
+	noatime   关闭atime特性，提高性能，这是一个很老的特性，放心关闭，还能减少loadcycle
+	defaults  使用默认设置。等于rw,suid,dev,exec,auto,nouser,async，具体含义看下面的解释。
+	auto  在启动或在终端中输入mount -a时自动挂载
+	noauto  设备（分区）只能手动挂载 The file system can be mounted only explicitly.
+	iocharset＝   在＝号后面加入你的本地编码，似乎在这个设备（分区）中做文件IO的时候就会自动做编码的格式转换。
+   		例如：你的某个分区是编码是utf8，而设备中文件的编码是gb2312，当是复制你设备中的文件到你的这个分区时，它将自动做编码转换。  
+	nls=     在=号后面加入你的本地编码，你的中文就不会出现乱码。
+	umask=   这是关于读写权限的，好像比下面的ro，rw选项更管用！！！
+		例如：umask=000或0222，使得挂载时option中有default，普通用户仍然能读写挂载设备中的东西。
+		ro  挂载为只读权限
+		rw   挂载为读写权限
+	exec     是一个默认设置项，它使在那个分区中的可执行的二进制文件能够执行。
+	noexec  二进制文件不允许执行。千万不要在你的root分区中用这个选项！！！
+	user  允许任何用户挂载设备。 Implies noexec,nosuid,nodev unless overridden.
+	nouser  只允许root用户挂载。这是默认设置。
+	suid    Permit the operation of suid, and sgid bits. They are mostly used to allow users on a computer system 
+		to execute binary executables with temporarily elevated privileges in order to perform a specific task.
+   	nosuid   Blocks the operation of suid, and sgid bits.
+
+	<dump> 是dump utility用来决定是否做备份的. 安装之后(Arch Linux默认是不安装dump的), 
+	dump会检查entry并用数字来决定是否对这个文件系统进行备份。允许的数字是0和1。
+	如果是0，dump就会忽略这个文件系统，如果是1，dump就会作一个备份。
+	大部分的用户是没有安装dump的，所以对他们而言<dump>这个entry应该写为0。 </dump></dump>
+
+	<pass> fsck会检查这个头目下的数字来决定检查文件系统的顺序
+	（looks at the number substituted for <pass> and determines in which order the file systems should be checked）。
+	允许的数字是0, 1, 和2。 文件系统的<pass>选项是0将不会被fsck utility检查。
+	root文件系统应该拥有最高的优先权 1，
+	而所有其它的文件系统，如果你想让它被check的话，应该写成2。 </pass></pass></pass>
+
+
+
+用fstab自动挂载FAT32和NTFS分区
+1.先在用fdisk -l（可能需要在root权限下）得到硬盘信息表，例如：
+＃  Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1        2397    19253871    b  W95 FAT32
+/dev/sda2            2398        3144     6000277+  83  Linux
+/dev/sda3            3145        9729    52894012+   5  Extended
+/dev/sda5            3145        3152       64228+  83  Linux
+/dev/sda6            3153        3276      995998+  82  Linux swap / Solaris
+/dev/sda7            3277        7340    32644048+  83  Linux
+/dev/sda8            7341        9729    19189611    7  HPFS/NTFS
+
+从上面知道，这台电脑上只有一个硬盘，其中分区sda1和sda8为NTFS格式，sda1为可以启动的，因而可能为window的系统所在盘。
+下面把系统盘以只读方式持载上去，非系统盘sda8以读写方式挂载上去（不能挂载在"/"及其以下的任何目录）。
+
+2.用你喜欢的编辑器在终端中打开/etc/fstab，例如：nano /etc/fstab
+在文件末尾加入：
+/dev/sda1 /mnt/WindowsC vfat defaults,codepage=936,iocharset=cp936,umask=0222 0 0
+/dev/sda8 /mnt/WindowsD ntfs defaults,iocharset=utf8,umask=000,nls=utf8 0 0
+保存，退出。
+警告：使用936的codepage挂在fat32分区可能会造成linux下识别中文正常但是到windows下反而出现乱码，
+推荐替换成utf8，但是dmesg提示警告，没有关系，n多人用了这么长时间都没有问题
+/dev/sda1 /mnt/WindowsC vfat user,utf8,umask=000 0 0
+
+3.在终端中输入
+mount -a
+你就应该能在/mnt/WindowsC下找到你的系统分区sda1内容，在/home/username/WindowsD中找到sda8的内容(其中username指用户名)
+
+
+
+samrt210的nfs文件系统的fstab
+#device   mount-point   type     options        dump  fsck order
+proc      /proc         proc     defaults     	0     0
+tmpfs     /tmp         	tmpfs    defaults       0     0
+sysfs     /sys          sysfs    defaults       0     0
+tmpfs     /dev          tmpfs    defaults       0     0
+
+
+/**************************** 内核初启动,注意最后卡死在文件系统初始化失败 *********************************/
+
+修改主Makefile:		//非常重要,确保后面的配置操作时(包括make menuconfig),配置系统只调出 arm 架构的配置选项,而非其他内容
+#add by huang
+ARCH		?= arm
+CROSS_COMPILE	?= arm-linux
+
+
+配置操作:
+make s5pv210_defconfig 		//初步配置
+make menuconfig			//具体调整
+	System Type--->
+		(0) S3C UART to use for low-level messages	//串口0做调试输出
+	S5PV210 Machines--->
+		[*] SMDKV210	//只选择SMDKV210这个板子,其他Machines,包括S5PC110的Machines全部取消选择
+
+
+编译调试:
+make uImage -j4
+"mkimage" command not found - U-Boot images will not be built
+make[1]: *** [arch/arm/boot/uImage] Error 1	
+这里的mkimage工具是另外uboot提供的,
+解决:sudo apt-get install u-boot-tools
+重新make uImage -j4 成功
+
+由于使用 tftp 拷贝 uImage,所以修改Makefile,编译完自动拷贝文件到tftpboot
+arch/arm/boot/Makefile:
+$(obj)/uImage:	$(obj)/zImage FORCE
+	@$(check_for_multiple_loadaddr)
+	$(call if_changed,uimage)
+	@$(kecho) '  Image $@ is ready'
+	cp $(obj)/uImage /tftpboot/		//编译完自动拷贝文件到tftpboot
+
+开发板操作:
+tftp 20000000 uImage		//拷入uImage到ram 0x20000000
+bootm				//启动内核
+tftpboot 20000000 uImage;bootm
+
+
+
+开发板操作log:
+启动内核后:
+Error: unrecognized/unsupported machine ID (r1 = 0x00000722).
+由于,uboot的全局变量的机器码id与kernel全局变量的机器码id不一致,内核的 SMDKV210 开发板的机器码 2456(0x998)
+所以修改uboot4:
+uboot4/u-boot-2014.04/arch/arm/include/asm/mach-types.h
+	#define MACH_TYPE_SMDKV210             2456
+	/* add by huang */
+	#define MACH_TYPE_SMART210             2456
+uboot4/u-boot-2014.04/board/samsung/smart210/smart210.c
+	int board_init(void)
+	{
+		dm9000_pre_init();	/* 为dm9000 设置SROM,bank1相关寄存器bw,bc */
+		gd->bd->bi_arch_number = MACH_TYPE_SMART210;
+		gd->bd->bi_boot_params = PHYS_SDRAM_1 + 0x100;
+		return 0;
+	}
+
+修改后重试:
+VFS: Cannot open root device "mtdblock5" or unknown-block(0,0): error -6
+Please append a correct "root=" boot option; here are the available partitions:
+Kernel panic - not syncing: VFS: Unable to mount root fs on unknown-block(0,0)
+CPU: 0 PID: 1 Comm: swapper Not tainted 3.10.102 #1
+处理make menuconfig 把filesystem全部取消勾选重试:
+VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+VFS: Cannot open root device "mtdblock5" or unknown-block(0,0): error -19
+Please append a correct "root=" boot option; here are the available partitions:
+Kernel panic - not syncing: VFS: Unable to mount root fs on unknown-block(0,0)
+CPU: 0 PID: 1 Comm: swapper Not tainted 3.10.102 #2
+处理make menuconfig 勾选device drivers -> 
+				Memory Technology Device (MTD) support --->
+					Caching block device access to MTD devices
+重试:
+VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+VFS: Cannot open root device "mtdblock5" or unknown-block(0,0): error -19
+Please append a correct "root=" boot option; here are the available partitions:
+Kernel panic - not syncing: VFS: Unable to mount root fs on unknown-block(0,0)
+CPU: 0 PID: 1 Comm: swapper Not tainted 3.10.102 #3
+注意:文件系统仍然没有处理好,在这种情况下,直接下一步,初始话dm9000
+
+
+/**************************** 初始化dm9000 与nfs 成功 *********************************/
+
+arch/arm/mach-s5pv210/include/mach/map.h
+/* add by huang  */
+#define S5PV210_PA_SROM_BANK1		0x88000000	//因为dm9000接在srom bank1
+
+arch/arm/mach-s5pv210/mach-smdkv210.c
+/* add by huang */
+static struct resource smdkv210_dm9000_resources[] = {
+	[0] = DEFINE_RES_MEM(S5PV210_PA_SROM_BANK1, 4),
+	[1] = DEFINE_RES_MEM(S5PV210_PA_SROM_BANK1 + 4, 4),
+	[2] = DEFINE_RES_NAMED(IRQ_EINT(7), 1, NULL, IORESOURCE_IRQ \		//smart210 开发板的 DM9000 使用外部中断 7
+				| IORESOURCE_IRQ_HIGHLEVEL),
+};
+static void __init smdkv210_machine_init(void)
+{
+	s3c_pm_init();
+	/* add by huang */
+	/* smdkv210_dm9000_init(); */		//由于uboot已经初始化dm9000,这里先注释掉
+....}
+
+make menuconfig:
+[*] Networking support --->
+	Networking options --->
+		<*> Packet socket
+		<*>	Packet: sockets monitoring interface
+		<*> Unix domain sockets
+		<*>	UNIX: socket monitoring interface
+		[*] TCP/IP networking
+		[*]	IP: multicasting
+		[*]	IP: advanced router
+		[*] 	IP: kernel level autoconfiguration
+		[*] 		IP: DHCP support
+		[*] 		IP: BOOTP support
+		[*] 		IP: RARP support
+Device Drivers --->
+	[*] Network device support --->
+		[*]Ethernet driver support (NEW) --->
+			<*> DM9000 support		//将其他的设备全部去掉,只保留 DM9000
+File systems--->
+	[*] Network File Systems (NEW) --->
+		<*> NFS client support 
+		[*] Root file system on NFS
+
+制作一个根文件系统:
+下载busybox-1.21.1: https://busybox.net/downloads/
+解压,并cd到busybox-1.21.1配置:make menuconfig
+Busybox Settings --->
+	General Configuration --->
+		[ ] Enable options for full-blown desktop systems //我们使用的是嵌入式系统,如果不取消,在执行 ps 命令时不会显示进程状态
+	Build Options --->
+		(arm-linux-) Cross Compiler prefix	//指定交叉编译器前缀
+	Installation Options ("make install" behavior) --->
+		(./_install) BusyBox installation prefix (NEW)	//指定安装路径(即busybox-1.21.1/_install)
+Init Utilities --->
+	[ ] Be _extra_ quiet on boot	//取消可以在系统启动时显示 busybox 版本号加载和卸载内核模块
+Linux Module Utilities --->
+	[ ] Simplified modutils		//我们不适应简单的,我们需要使用 insmod 等工具
+	[*] insmod
+	[*] rmmod
+	[*] lsmod
+	[*] modprobe
+	[*] depmod
+编译和安装:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/busybox/busybox-1.21.1$ make && make install
+建立rootfs:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/busybox/busybox-1.21.1$ mkdir ../../rootfs
+拷贝生成内容到rootfs:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/busybox/busybox-1.21.1$ cp _install/* ../../rootfs/ -a   //这里的"*/"与指令无关
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/busybox/busybox-1.21.1$ cp examples/bootfloppy/etc/ ../../rootfs/ -r
+拷贝系统的 passwd、group、shadow 到根文件系统
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ cp /etc/passwd etc/
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ cp /etc/group etc/
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ sudo cp /etc/shadow etc/
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ sudo chmod 777 etc/shadow //以防万一,给烤来的shadow解权限
+改password文件:
+rootfs/etc/password:
+root:x:0:0:root:/root:/bin/ash	//因为文件系统的 bin 目录下没有 bash 这个命令,而是用 ash 代替 bash
+创建必要的设备文件节点:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ mkdir dev
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ sudo mknod dev/console c 5 1	
+	//console是设备的名字
+	//c指字符设备
+	//5是该设备在major.h中定义的标记
+	//1是第一个子设备
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ sudo mknod dev/null c 1 3
+创建相关目录:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ mkdir mnt proc var tmp sys root lib
+从交叉编译器拷贝库到 rootfs 的 lib 目录:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ cp /opt/FriendlyARM/toolschain/4.5.1/arm-none-linux-gnueabi/sys-root/usr/lib/* lib/ -a			//这里的"*/"与指令无关
+压缩目录:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ su
+root@kingders-ThinkPad-T420:/home/kingders/smart210/kernel/kernel2/rootfs# arm-linux-strip lib/*		//这里的"*/"与指令无关
+以下:参考见210嵌入笔记kernel:6.2的例子
+	修改 rootfs/etc/inittab 	
+	修改 rootfs/ etc/fstab 	
+	修改 rootfs/etc/init.d/rcS
+	修改 rootfs/etc/profile		//关于这几个文件的内容一定要网上research
+
+开启pc的nfs服务:
+apt-get install nfs-kernel-server	//安装nfs服务器
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/rootfs$ sudo gedit /etc/exports	//修改exports
+/home/kingders/smart210/kernel/kernel2/rootfs  *(rw,sync,no_subtree_check,no_root_squash)	//添加内容
+	/home/jacobxu/nfs-jacoxu：与nfs服务客户端共享的目录，这个路径必须和你前面设置的文件的路径一致！
+	*：允许所有的网段访问，也可以使用具体的IP
+	rw：挂接此目录的客户端对该共享目录具有读写权限
+	sync：资料同步写入内存和硬盘
+	no_root_squash：root用户具有对根目录的完全管理访问权限。
+	no_subtree_check：不检查父目录的权限。
+执行命令：sudo /etc/init.d/rpcbind restart 重启rpcbind 服务。nfs是一个RPC程序，使用它前，需要映射好端口，通过rpcbind 设定。
+执行命令：sudo /etc/init.d/nfs-kernel-server restart 重启nfs服务
+
+运行(成功):
+使用已完备移植的uboot4:
+sd卡启动
+设置bootargs:
+set bootargs root=/dev/nfs nfsroot=192.168.2.227:/home/kingders/smart210/kernel/kernel2/rootfs ip=192.168.2.120:192.168.2.227:192.168.2.1:255.255.255.0 console=ttySAC0,115200n8 mem=64m
+	//root=/dev/nfs		根文件设备挂载的设备点，这里是nfs文件系统
+	//nfsroot=192.168.2.227:/home/kingders/smart210/kernel/kernel2/rootfs	nfs文件系统映射到的目录
+	//ip=192.168.2.120:192.168.2.227:192.168.2.1:255.255.255.0	板子ip:nfs服务器ip:网关ip:子网掩码
+	//console=ttySAC0,115200n8	console终端的挂载的串口设备点ttySAC0，波特率115200,no parity,数据８位传输	
+	//mem=64m	这里是nfs文件系统运行时,被分配的ram的缓存大小
+	//		因为面向这个linux内核版本,这个参数不能不设,不然会卡死在Uncompressing Linux... done, booting the kernel.
+	//		而且也不能设太大,不然系统会跑偏,关于内核的内存布局值得另外深入研究.
+	//经过复杂调试,以上的bootargs才能使内核稳定启动.
+保存环境变量:
+saveenv
+tftp下载并启动:		
+tftpboot 20000000 uImage;bootm		//用";"隔开,可以一次输入多指令
+尝试简单命令:
+ps cd top....
+
+另外:启动中
+dm9000 dm9000: read wrong id 0x01010101
+这是 dm9000 驱动在读取 ID 时的错误,驱动中会连续读取 8 次,这里第一次读取错误,我们可以在
+第一次读取之前加上一个延时,就可以解决这个错误。在移植 u-boot 中就加了一个延时
+然而设置了while(100--)还是没有用,难道要相当大的延时?不管,反正无影响.
+
+/**************************** nand移植 成功 *********************************/
+
+并没有关于s5p架构的nand控制器架构,但是这款芯片继承s3c架构的nand控制器架构,所以可以移植s3c_nand架构内容驱动nand控制器
+
+arch/arm/plat-samsung/include/plat/regs-nand.h
+/* add by huang */
+#define S5PV210_NFCONF  		S3C2410_NFREG(0x00)
+#define S5PV210_NFCONT  		S3C2410_NFREG(0x04)
+#define S5PV210_NFCMD   		S3C2410_NFREG(0x08)
+#define S5PV210_NFADDR  		S3C2410_NFREG(0x0C)
+#define S5PV210_NFDATA  		S3C2410_NFREG(0x10)
+#define S5PV210_NFSTAT  		S3C2410_NFREG(0x28)
+/* about nand flash ecc */
+#define S5PV210_NFECC			S3C2410_NFREG(0x20000)
+#define S5PV210_NFECCCONF  		S3C2410_NFREG(0x00) + (S5PV210_NFECC)
+#define S5PV210_NFECCCONT  		S3C2410_NFREG(0x20) + (S5PV210_NFECC)
+#define S5PV210_NFECCSTAT		S3C2410_NFREG(0x30) + (S5PV210_NFECC)
+#define S5PV210_NFECCSECSTAT	S3C2410_NFREG(0x40) + (S5PV210_NFECC)
+#define S5PV210_NFECCPRGECC0	S3C2410_NFREG(0x90) + (S5PV210_NFECC)
+#define S5PV210_NFECCPRGECC1	S3C2410_NFREG(0x94) + (S5PV210_NFECC)
+#define S5PV210_NFECCPRGECC2	S3C2410_NFREG(0x98) + (S5PV210_NFECC)
+#define S5PV210_NFECCPRGECC3	S3C2410_NFREG(0x9C) + (S5PV210_NFECC)
+#define S5PV210_NFECCERL0		S3C2410_NFREG(0xC0) + (S5PV210_NFECC)
+#define S5PV210_NFECCERL1		S3C2410_NFREG(0xC4) + (S5PV210_NFECC)
+#define S5PV210_NFECCERL2		S3C2410_NFREG(0xC8) + (S5PV210_NFECC)
+#define S5PV210_NFECCERL3		S3C2410_NFREG(0xCC) + (S5PV210_NFECC)
+#define S5PV210_NFECCERP0		S3C2410_NFREG(0xF0) + (S5PV210_NFECC)
+#define S5PV210_NFECCERP1		S3C2410_NFREG(0xF4) + (S5PV210_NFECC)
+
+drivers/mtd/nand/Kconfig
+config MTD_NAND_S3C2410
+	tristate "NAND Flash support for Samsung S3C SoCs"
+	depends on ARCH_S3C24XX || ARCH_S3C64XX || ARCH_S5PV210		//让 drivers/mtd/nand/s3c2410.c 被编译进内核
+	help								//如果不添加 ARCH_S5PV210,配置菜单不会出现这个选项
+	  This enables the NAND flash controller on the S3C24xx and S3C64xx
+	  SoCs
+	  No board specific support is done by this driver, each board
+	  must advertise a platform_device for the driver to attach.
+
+drivers/mtd/nand/s3c2410.c
+enum s3c_cpu_type {
+	TYPE_S3C2410,
+	TYPE_S3C2412,
+	TYPE_S3C2440,
+	/* add by zjh */
+	TYPE_S5PV210,		};
+static int s3c2410_nand_setrate(struct s3c2410_nand_info *info)
+{....
+	switch (info->cpu_type) {.....			//设置分频
+	/* add by huang */
+	case TYPE_S5PV210:
+		mask = (0xF << 12) | (0xF << 8) | (0xF << 4);
+
+		set = (tacls + 1) << 12;
+		set |= (twrph0 - 1 + 1) << 8;
+		set |= (twrph1 - 1 + 1) << 4;
+		break;		...}.....}
+static int s3c24xx_nand_probe(struct platform_device *pdev)
+{......
+	info->clk = devm_clk_get(&pdev->dev, "nand");	//获得 nand 控制器时钟
+......}
+static int s3c2410_nand_inithw(struct s3c2410_nand_info *info)
+{
+	int ret;
+	unsigned long uninitialized_var(cfg);	/* add by zjh */
+	
+	ret = s3c2410_nand_setrate(info);
+	if (ret < 0)
+		return ret;
+	switch (info->cpu_type) {
+	case TYPE_S3C2410:
+	default:
+		break;
+	case TYPE_S3C2440:
+	case TYPE_S3C2412:
+		/* enable the controller and de-assert nFCE */
+		writel(S3C2440_NFCONT_ENABLE, info->regs + S3C2440_NFCONT);
+		break;	/* add by zjh */		
+	/* add by zjh */
+	case TYPE_S5PV210:
+		cfg = readl(info->regs + S5PV210_NFCONF);
+		cfg &= ~(0x1 << 3);	/* SLC NAND Flash */
+		cfg &= ~(0x1 << 2);	/* 2KBytes/Page */
+		cfg |= (0x1 << 1);	/* 5 address cycle */
+		writel(cfg, info->regs + S5PV210_NFCONF);
+		/* Disable chip select and Enable NAND Flash Controller */
+		writel((0x1 << 1) | (0x1 << 0), info->regs + S5PV210_NFCONT);
+		break;
+	}
+	return 0;
+}
+/* add by huang */
+static void s5pv210_nand_hwcontrol(struct mtd_info *mtd, int cmd,
+				   unsigned int ctrl)
+{
+	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
+	if (cmd == NAND_CMD_NONE)
+		return;
+	if (ctrl & NAND_CLE)
+		writeb(cmd, info->regs + S5PV210_NFCMD);
+	else
+		writeb(cmd, info->regs + S5PV210_NFADDR);
+}
+/* add by huang */
+static int s5pv210_nand_devready(struct mtd_info *mtd)
+{
+	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
+	return readb(info->regs + S5PV210_NFSTAT) & 0x1;
+}
+static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info, struct s3c2410_nand_mtd *nmtd, struct s3c2410_nand_set *set)
+{........
+	switch (info->cpu_type) {.......
+	/* add by huang */
+	case TYPE_S5PV210:
+		chip->IO_ADDR_W = regs + S5PV210_NFDATA;
+		info->sel_reg   = regs + S5PV210_NFCONT;
+		info->sel_bit	= (1 << 1);
+		chip->cmd_ctrl  = s5pv210_nand_hwcontrol;
+		chip->dev_ready = s5pv210_nand_devready;
+		break;
+	}
+......)
+static struct platform_device_id s3c24xx_driver_ids[] = {
+	{
+		.name		= "s3c2410-nand",
+		.driver_data	= TYPE_S3C2410,
+	}, {
+		.name		= "s3c2440-nand",
+		.driver_data	= TYPE_S3C2440,
+	}, {
+		.name		= "s3c2412-nand",
+		.driver_data	= TYPE_S3C2412,
+	}, {
+		.name		= "s3c6400-nand",
+		.driver_data	= TYPE_S3C2412, /* compatible with 2412 */
+	},{	/* add by hunag */
+		.name		= "s5pv210-nand",
+		.driver_data	= TYPE_S5PV210,
+	},
+	{ }
+};
+
+
+arch/arm/mach-s5pv210/clock.c
+static struct clk init_clocks_off[] = {....
+	{	/* add by huang */
+		.name		= "nand",		//添加 针对 nand 定义时钟
+		.parent		= &clk_hclk_psys.clk,
+		.enable		= s5pv210_clk_ip1_ctrl,
+		.ctrlbit	= (1 << 24),
+	},		
+.....};
+
+arch/arm/plat-samsung/devs.c
+#ifdef CONFIG_S3C_DEV_NAND			//nand控制器是一个平台设备,根据宏,选择是否加入nand控制器平台设备到内核
+static struct resource s3c_nand_resource[] = {
+	[0] = DEFINE_RES_MEM(S3C_PA_NAND, SZ_1M),
+};
+
+struct platform_device s3c_device_nand = {
+	.name		= "s3c2410-nand",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(s3c_nand_resource),
+	.resource	= s3c_nand_resource,
+};.......
+
+arch/arm/mach-s5pv210/Kconfig
+config MACH_SMDKV210
+	bool "SMDKV210"
+	select CPU_S5PV210
+	select S3C_DEV_FB
+	select S3C_DEV_HSMMC
+	select S3C_DEV_HSMMC1
+	select S3C_DEV_HSMMC2
+	select S3C_DEV_HSMMC3
+	select S3C_DEV_I2C1
+	select S3C_DEV_I2C2
+	select S3C_DEV_RTC
+	select S3C_DEV_USB_HSOTG
+	select S3C_DEV_WDT
+	select S5PV210_SETUP_FB_24BPP
+	select S5PV210_SETUP_I2C1
+	select S5PV210_SETUP_I2C2
+	select S5PV210_SETUP_IDE
+	select S5PV210_SETUP_KEYPAD
+	select S5PV210_SETUP_SDHCI
+	select S5PV210_SETUP_USB_PHY
+	select S5P_DEV_FIMC0
+	select S5P_DEV_FIMC1
+	select S5P_DEV_FIMC2
+	select S5P_DEV_JPEG
+	select S5P_DEV_MFC
+	select SAMSUNG_DEV_ADC
+	select SAMSUNG_DEV_BACKLIGHT
+	select SAMSUNG_DEV_IDE
+	select SAMSUNG_DEV_KEYPAD
+	select SAMSUNG_DEV_PWM
+	select SAMSUNG_DEV_TS
+	select S3C_DEV_NAND		//添加,表示 #define CONFIG_S3C_DEV_NAND ,表示加入nand控制器平台设备到内核
+	help
+	  Machine support for Samsung SMDKV210
+
+arch/arm/mach-s5pv210/include/mach/map.h
+/* add by huang  */
+#define S5PV210_PA_NAND			0xB0E00000	
+#define S3C_PA_NAND			S5PV210_PA_NAND	//nand控制器平台设备的基地址,设备初始化等情况下要使用到
+
+arch/arm/mach-s5pv210/mach-smdkv210.c
+/* add by huang */
+#include <plat/nand-core.h>
+#include <linux/platform_data/mtd-nand-s3c2410.h>
+#include <linux/mtd/partitions.h>
+/* nand info start (add by zjh) */
+static struct mtd_partition smdk_default_nand_part[] = {	//nandflash的分区信息,要求与uboot的一致
+	[0] = {							//由于此刻的uboot的nandflash的分区与此不一致,缺少log区
+		.name	= "bootloader",				//所以uboot的重新分区
+		.size	= SZ_256K,
+		.offset	= 0,
+	},
+	[1] = {
+		.name	= "params",
+		.offset = MTDPART_OFS_APPEND,
+		.size	= SZ_128K,
+	},
+	[2] = {
+		.name	= "log",
+		.offset = MTDPART_OFS_APPEND,
+		.size	= SZ_2M,
+	},
+	[3] = {
+		.name	= "kernel",
+		.offset	= MTDPART_OFS_APPEND,
+		.size	= SZ_1M + SZ_2M,
+	},
+
+	[4] = {
+		.name	= "rootfs",
+		.offset = MTDPART_OFS_APPEND,
+		.size	= MTDPART_SIZ_FULL,
+	}
+};
+
+static struct s3c2410_nand_set smdk_nand_sets[] = {
+	[0] = {
+		.name		= "NAND",
+		.nr_chips	= 1,
+		.nr_partitions	= ARRAY_SIZE(smdk_default_nand_part),
+		.partitions	= smdk_default_nand_part,
+		.disable_ecc = 1,
+	},
+};
+
+static struct s3c2410_platform_nand smdk_nand_info = {
+	.tacls		= 12,
+	.twrph0		= 12,
+	.twrph1		= 5,
+	.nr_sets	= ARRAY_SIZE(smdk_nand_sets),
+	.sets		= smdk_nand_sets,
+};
+
+static void s5pv210_nand_gpio_cfg(void)
+{
+	volatile unsigned long *mp01;
+	volatile unsigned long *mp03;
+	volatile unsigned long *mp06;	
+	mp01 = (volatile unsigned long *)ioremap(0xE02002E0, 4);
+	mp03 = (volatile unsigned long *)ioremap(0xE0200320, 4);
+	mp06 = (volatile unsigned long *)ioremap(0xE0200380, 4);	
+	*mp01 &= ~(0xFFFF << 8);
+	*mp01 |= (0x3333 << 8);
+	*mp03 = 0x22222222;
+	*mp06 = 0x22222222;	
+	iounmap(mp01);
+	iounmap(mp03);
+	iounmap(mp06);
+}
+/* nand info end (add by zjh) */
+static struct platform_device *smdkv210_devices[] __initdata = {
+	&s3c_device_adc,
+	&s3c_device_cfcon,
+	&s3c_device_fb,
+	&s3c_device_hsmmc0,
+	&s3c_device_hsmmc1,
+	&s3c_device_hsmmc2,
+	&s3c_device_hsmmc3,
+	&s3c_device_i2c0,
+	&s3c_device_i2c1,
+	&s3c_device_i2c2,
+	&s3c_device_rtc,
+	&s3c_device_ts,
+	&s3c_device_usb_hsotg,
+	&s3c_device_wdt,
+	&s5p_device_fimc0,
+	&s5p_device_fimc1,
+	&s5p_device_fimc2,
+	&s5p_device_fimc_md,
+	&s5p_device_jpeg,
+	&s5p_device_mfc,
+	&s5p_device_mfc_l,
+	&s5p_device_mfc_r,
+	&s5pv210_device_ac97,
+	&s5pv210_device_iis0,
+	&s5pv210_device_spdif,
+	&samsung_asoc_idma,
+	&samsung_device_keypad,
+	&smdkv210_dm9000,
+	&smdkv210_lcd_lte480wv,
+	&s3c_device_nand,	/* add by huang */
+};
+static void __init smdkv210_machine_init(void)
+{
+	s3c_pm_init();
+	/* masked by zjh */
+	//smdkv210_dm9000_init();	
+	/* add by zjh */
+	s3c_nand_setname("s5pv210-nand");		//nand 设名 为了 arch/arm/plat-samsung/devs.c:s3c_device_nand
+	s3c_nand_set_platdata(&smdk_nand_info);		//nand 设置平台设备信息
+	s5pv210_nand_gpio_cfg();			//设置 nand gpio
+	samsung_keypad_set_platdata(&smdkv210_keypad_data);
+	s3c24xx_ts_set_platdata(NULL);
+	s3c_i2c0_set_platdata(NULL);
+	s3c_i2c1_set_platdata(NULL);
+	s3c_i2c2_set_platdata(NULL);
+	i2c_register_board_info(0, smdkv210_i2c_devs0,
+			ARRAY_SIZE(smdkv210_i2c_devs0));
+	i2c_register_board_info(1, smdkv210_i2c_devs1,
+			ARRAY_SIZE(smdkv210_i2c_devs1));
+	i2c_register_board_info(2, smdkv210_i2c_devs2,
+			ARRAY_SIZE(smdkv210_i2c_devs2));
+	s3c_ide_set_platdata(&smdkv210_ide_pdata);
+	s3c_fb_set_platdata(&smdkv210_lcd0_pdata);
+	samsung_bl_set(&smdkv210_bl_gpio_info, &smdkv210_bl_data);
+	s3c_hsotg_set_platdata(&smdkv210_hsotg_pdata);
+	platform_add_devices(smdkv210_devices, ARRAY_SIZE(smdkv210_devices));
+}
+
+make menuconfig
+Device Drivers --->
+	<*> Memory Technology Device (MTD) support --->
+		<*> Caching block device access to MTD devices 
+		<*> NAND Device Support --->
+			<*> NAND Flash support for Samsung S3C SoCs
+make uImage -j4
+
+运行:
+使用已完备移植的uboot4:
+sd卡启动 (仍然过载nfs启动)
+tftp下载并启动:		
+tftpboot 20000000 uImage;bootm
+启动log已经可以看到初始化nand的内容:
+brd: module loaded
+loop: module loaded
+s3c24xx-nand s5pv210-nand: Tacls=2, 14ns Twrph0=2 14ns, Twrph1=1 7ns
+s3c24xx-nand s5pv210-nand: NAND ECC disabled
+NAND device: Manufacturer ID: 0xec, Chip ID: 0xdc (Samsung NAND 512MiB 3,3V 8-bit), 512MiB, page size: 2048, OOB size: 64
+NAND_ECC_NONE selected by board driver. This is not recommended!
+Scanning device for bad blocks
+Creating 5 MTD partitions on "NAND":
+0x000000000000-0x000000040000 : "bootloader"
+0x000000040000-0x000000060000 : "params"
+0x000000060000-0x000000260000 : "log"
+0x000000260000-0x000000560000 : "kernel"
+0x000000560000-0x000020000000 : "rootfs"
+
+/**************************** nand 挂载jffs2文件系统  *********************************/
+
+制作jffs2文件系统:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2/linux-3.10.102$ sudo apt-get install mtd-utils
+然后便可以使用 mkfs.jffs2 制作 jffs2 文件系统了:
+kingders@kingders-ThinkPad-T420:~/smart210/kernel/kernel2$ sudo mkfs.jffs2 -d rootfs -o rootfs.jffs2 -s 2048 -e 0x20000 –n
+	//-d:指定根文件系统目录
+	//-o:指定输出文件
+	//-s:指定页大小 2K(根据 NAND FLASH 芯片手册)
+	//-e:指定块擦除大小 128K, 所以 -e 0x20000 (根据 NAND FLASH 芯片手册)
+	//-n:指定不要在每个擦除块上添加清除标记
+uboot操作:
+SMART210 # nand erase.part rootfs
+SMART210 # tftp 20000000 rootfs.jffs2
+SMART210 # nand write 20000000 rootfs $filesize  //注意: 不可以 $(filesize)
+SMART210 # set bootargs root=/dev/mtdblock4 rootfstype=jffs2 init=/linuxrc console=ttySAC0,115200n8 mem=64m
+SMART210 # saveenv
+修改内核配置支持jffs2文件系统:
+make menuconfig
+File systems --->
+	[*] Miscellaneous filesystems --->
+		<*> Journalling Flash File System v2 (JFFS2) support
+make uImage -j4
+
+调试:
+tftp下载并启动:		
+tftpboot 20000000 uImage;bootm
+log:
+VFS: Mounted root (jffs2 filesystem) on device 31:4.
+Freeing unused kernel memory: 136K (80376000 - 80398000)
+Failed to execute /linuxrc.  Attempting defaults...
+Kernel panic - not syncing: No init found.  Try passing init= option to kernel. See Linux Documentation/init.txt for guidance.
+CPU: 0 PID: 1 Comm: swapper Not tainted 3.10.102 #7
+问题在于,找不到/linuxrc,然而/linuxrc是存在的,那么最有可能是放错位置,然而,rootfs.jffs2的确是烧在rootfs分区的,
+那么有可能uboot的分区与内核的分区地址不一致,
+检查uboot分区:mtdparts
+发现原来的确是分区错了,缺少log区,使uboot与内核的rootfs地址起始处相对错位!!
+即uboot拷到uboot的rootfs时,实际上,在内核看来是log区的地方!!
+uboot重置分区,并且最后一定要saveenv保存环境变量!!!这次错误是之前uboot重置分区后,没有saveenv,导致后面重新上电后,打回原形
+修改后重试成功.
+
+最后:
+set bootargs root=/dev/mtdblock4 rootfstype=jffs2 init=/linuxrc console=ttySAC0,115200n8 mem=64m 
+//uboot设bootargs时,一定要设置mem,不然一定出错!!
+
+整合一些常用命令:
+nandflash擦除 rootfs 块, 然后tftp下载 rootfs.jffs2文件系统设备的文件,然后写入 rootfs 块始地址
+nand erase.part rootfs;tftp 20000000 rootfs.jffs2;nand write 20000000 rootfs $filesize
+
+设置nfs文件系统启动参数
+set bootargs root=/dev/nfs nfsroot=192.168.2.227:/home/kingders/smart210/kernel/kernel2/rootfs ip=192.168.2.120:192.168.2.227:192.168.2.1:255.255.255.0 console=ttySAC0,115200n8 mem=64m
+
+设置jffs2文件系统启动参数
+set bootargs root=/dev/mtdblock4 rootfstype=jffs2 init=/linuxrc console=ttySAC0,115200n8 mem=64m
+
+保存环境变量,//在uboot看来是环境变量,在内核看来是params
+saveenv
+
+/**************************** nand 整合ecc功能 成功 *********************************/
+
+arch/arm/mach-s5pv210/mach-smdkv210.c
+#include <linux/mtd/mtd.h>
+/* add by huang */
+static struct nand_ecclayout nand_oob_64 = {			//添加 nand_ecclayout 定义 OOB 布局 oob段对应nandflash页的 spare area
+	.eccbytes = 52,		/* 2048 / 512 * 13 */
+	.eccpos = {	12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+				22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+				32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 
+				42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+				52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+				62, 63},
+	/* 0和1用于保存坏块标记，12~63保存ecc，剩余2~11为free */
+	.oobfree = {
+			{.offset = 2,
+			.length = 10}
+		}
+};
+static struct s3c2410_nand_set smdk_nand_sets[] = {
+	[0] = {
+		.name		= "NAND",
+		.nr_chips	= 1,
+		.nr_partitions	= ARRAY_SIZE(smdk_default_nand_part),
+		.partitions	= smdk_default_nand_part,
+		.disable_ecc = 0,		//启动ecc
+		.ecc_layout = &nand_oob_64,	//添加放ecc码的oob段
+	},
+};
+
+NAND 驱动 drivers/mtd/nand/s3c2410.c	//里面所用到的寄存器索引都在arch/arm/plat-samsung/include/plat/regs-nand.h 中定义
+/* ECC handling functions */
+#ifdef CONFIG_MTD_NAND_S3C2410_HWECC
+/* add by zjh */
+static void s5pv210_nand_enable_hwecc(struct mtd_info *mtd, int mode)
+{
+	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
+	u32 cfg;
+	
+	if (mode == NAND_ECC_READ)
+	{
+		/* set 8/12/16bit Ecc direction to Encoding */
+		cfg = readl(info->regs + S5PV210_NFECCCONT) & (~(0x1 << 16));
+		writel(cfg, info->regs + S5PV210_NFECCCONT);
+		
+		/* clear 8/12/16bit ecc encode done */
+		cfg = readl(info->regs + S5PV210_NFECCSTAT) | (0x1 << 24);
+		writel(cfg, info->regs + S5PV210_NFECCSTAT);
+	}
+	else
+	{
+		/* set 8/12/16bit Ecc direction to Encoding */
+		cfg = readl(info->regs + S5PV210_NFECCCONT) | (0x1 << 16);
+		writel(cfg, info->regs + S5PV210_NFECCCONT);
+		
+		/* clear 8/12/16bit ecc encode done */
+		cfg = readl(info->regs + S5PV210_NFECCSTAT) | (0x1 << 25);
+		writel(cfg, info->regs + S5PV210_NFECCSTAT);
+	}
+	
+	/* Initialize main area ECC decoder/encoder */
+	cfg = readl(info->regs + S5PV210_NFCONT) | (0x1 << 5);
+	writel(cfg, info->regs + S5PV210_NFCONT);
+	
+	/* The ECC message size(For 512-byte message, you should set 511) 8-bit ECC/512B  */
+	writel((511 << 16) | 0x3, info->regs + S5PV210_NFECCCONF);
+			
+
+	/* Initialize main area ECC decoder/ encoder */
+	cfg = readl(info->regs + S5PV210_NFECCCONT) | (0x1 << 2);
+	writel(cfg, info->regs + S5PV210_NFECCCONT);
+	
+	/* Unlock Main area ECC   */
+	cfg = readl(info->regs + S5PV210_NFCONT) & (~(0x1 << 7));
+	writel(cfg, info->regs + S5PV210_NFCONT);
+}
+/* add by zjh */
+static int s5pv210_nand_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
+				      u_char *ecc_calc)
+{
+	u32 cfg;
+	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
+	u32 nfeccprgecc0 = 0, nfeccprgecc1 = 0, nfeccprgecc2 = 0, nfeccprgecc3 = 0;
+	
+	/* Lock Main area ECC */
+	cfg = readl(info->regs + S5PV210_NFCONT) | (0x1 << 7);
+	writel(cfg, info->regs + S5PV210_NFCONT);
+	
+	if (ecc_calc)	/* NAND_ECC_WRITE */
+	{
+		/* ECC encoding is completed  */
+		while (!(readl(info->regs + S5PV210_NFECCSTAT) & (1 << 25)));
+			
+		/* 读取13 Byte的Ecc Code */
+		nfeccprgecc0 = readl(info->regs + S5PV210_NFECCPRGECC0);
+		nfeccprgecc1 = readl(info->regs + S5PV210_NFECCPRGECC1);
+		nfeccprgecc2 = readl(info->regs + S5PV210_NFECCPRGECC2);
+		nfeccprgecc3 = readl(info->regs + S5PV210_NFECCPRGECC3);
+
+		ecc_calc[0] = nfeccprgecc0 & 0xFF;
+		ecc_calc[1] = (nfeccprgecc0 >> 8) & 0xFF;
+		ecc_calc[2] = (nfeccprgecc0 >> 16) & 0xFF;
+		ecc_calc[3] = (nfeccprgecc0 >> 24) & 0xFF;
+		ecc_calc[4] = nfeccprgecc1 & 0xFF;
+		ecc_calc[5] = (nfeccprgecc1 >> 8) & 0xFF;
+		ecc_calc[6] = (nfeccprgecc1 >> 16) & 0xFF;
+		ecc_calc[7] = (nfeccprgecc1 >> 24) & 0xFF;
+		ecc_calc[8] = nfeccprgecc2 & 0xFF;
+		ecc_calc[9] = (nfeccprgecc2 >> 8) & 0xFF;
+		ecc_calc[10] = (nfeccprgecc2 >> 16) & 0xFF;
+		ecc_calc[11] = (nfeccprgecc2 >> 24) & 0xFF;
+		ecc_calc[12] = nfeccprgecc3 & 0xFF;
+	}
+	else	/* NAND_ECC_READ */
+	{
+		/* ECC decoding is completed  */
+		while (!(readl(info->regs + S5PV210_NFECCSTAT) & (1 << 24)));
+	}
+	return 0;
+}
+/* add by zjh */
+static int s5pv210_nand_correct_data(struct mtd_info *mtd, u_char *dat,
+				     u_char *read_ecc, u_char *calc_ecc)
+{
+	int ret = 0;
+	u32 errNo;
+	u32 erl0, erl1, erl2, erl3, erp0, erp1;
+	struct s3c2410_nand_info *info = s3c2410_nand_mtd_toinfo(mtd);
+
+	/* Wait until the 8-bit ECC decoding engine is Idle */
+	while (readl(info->regs + S5PV210_NFECCSTAT) & (1 << 31));
+	
+	errNo = readl(info->regs + S5PV210_NFECCSECSTAT) & 0x1F;
+	erl0 = readl(info->regs + S5PV210_NFECCERL0);
+	erl1 = readl(info->regs + S5PV210_NFECCERL1);
+	erl2 = readl(info->regs + S5PV210_NFECCERL2);
+	erl3 = readl(info->regs + S5PV210_NFECCERL3);
+	
+	erp0 = readl(info->regs + S5PV210_NFECCERP0);
+	erp1 = readl(info->regs + S5PV210_NFECCERP1);
+	
+	switch (errNo)
+	{
+	case 8:
+		dat[(erl3 >> 16) & 0x3FF] ^= (erp1 >> 24) & 0xFF;
+	case 7:
+		dat[erl3 & 0x3FF] ^= (erp1 >> 16) & 0xFF;
+	case 6:
+		dat[(erl2 >> 16) & 0x3FF] ^= (erp1 >> 8) & 0xFF;
+	case 5:
+		dat[erl2 & 0x3FF] ^= erp1 & 0xFF;
+	case 4:
+		dat[(erl1 >> 16) & 0x3FF] ^= (erp0 >> 24) & 0xFF;
+	case 3:
+		dat[erl1 & 0x3FF] ^= (erp0 >> 16) & 0xFF;
+	case 2:
+		dat[(erl0 >> 16) & 0x3FF] ^= (erp0 >> 8) & 0xFF;
+	case 1:
+		dat[erl0 & 0x3FF] ^= erp0 & 0xFF;
+	case 0:
+		break;
+	default:
+		ret = -1;
+		printk("ECC uncorrectable error detected:%d\n", errNo);
+		break;
+	}	
+	return ret;
+}
+/* add by zjh */
+static int s5pv210_nand_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
+				uint8_t *buf, int oob_required, int page)				 
+{
+	int i, eccsize = chip->ecc.size;
+	int eccbytes = chip->ecc.bytes;
+	int eccsteps = chip->ecc.steps;
+	int col = 0;
+	int stat;
+	uint8_t *p = buf;
+	uint8_t *ecc_code = chip->buffers->ecccode;
+	uint32_t *eccpos = chip->ecc.layout->eccpos;
+
+	/* Read the OOB area first */
+	col = mtd->writesize;
+	chip->cmdfunc(mtd, NAND_CMD_RNDOUT, col, -1);
+	chip->read_buf(mtd, chip->oob_poi, mtd->oobsize);
+	
+	for (i = 0; i < chip->ecc.total; i++)
+		ecc_code[i] = chip->oob_poi[eccpos[i]];
+
+	for (i = 0, col = 0; eccsteps; eccsteps--, i += eccbytes, p += eccsize, col += eccsize)
+	{	
+		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, col, -1);
+		chip->ecc.hwctl(mtd, NAND_ECC_READ);
+		chip->read_buf(mtd, p, eccsize);
+		chip->write_buf(mtd, ecc_code + i, eccbytes);
+		chip->ecc.calculate(mtd, NULL, NULL);
+		stat = chip->ecc.correct(mtd, p, NULL, NULL);
+		if (stat < 0)
+			mtd->ecc_stats.failed++;
+		else
+			mtd->ecc_stats.corrected += stat;
+	}
+	return 0;
+}
+static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info, struct s3c2410_nand_mtd *nmtd, struct s3c2410_nand_set *set)
+{......
+#ifdef CONFIG_MTD_NAND_S3C2410_HWECC
+	chip->ecc.calculate = s3c2410_nand_calculate_ecc;
+	chip->ecc.correct   = s3c2410_nand_correct_data;
+	chip->ecc.mode	    = NAND_ECC_HW;
+	chip->ecc.strength  = 1;
+
+	switch (info->cpu_type) {
+	case TYPE_S3C2410:
+		chip->ecc.hwctl	    = s3c2410_nand_enable_hwecc;
+		chip->ecc.calculate = s3c2410_nand_calculate_ecc;
+		break;
+
+	case TYPE_S3C2412:
+		chip->ecc.hwctl     = s3c2412_nand_enable_hwecc;
+		chip->ecc.calculate = s3c2412_nand_calculate_ecc;
+		break;
+
+	case TYPE_S3C2440:
+		chip->ecc.hwctl     = s3c2440_nand_enable_hwecc;
+		chip->ecc.calculate = s3c2440_nand_calculate_ecc;
+		break;
+	/* add by zjh */
+	case TYPE_S5PV210:
+		chip->ecc.hwctl     = s5pv210_nand_enable_hwecc;
+		chip->ecc.calculate = s5pv210_nand_calculate_ecc;
+		chip->ecc.correct 	= s5pv210_nand_correct_data;
+		chip->ecc.read_page = s5pv210_nand_read_page_hwecc;
+		break;	
+	}
+.....}
+static void s3c2410_nand_update_chip(struct s3c2410_nand_info *info,
+				     struct s3c2410_nand_mtd *nmtd)
+{
+	struct nand_chip *chip = &nmtd->chip;
+
+	dev_dbg(info->device, "chip %p => page shift %d\n",
+		chip, chip->page_shift);
+
+	if (chip->ecc.mode != NAND_ECC_HW)
+		return;
+
+		/* change the behaviour depending on whether we are using
+		 * the large or small page nand device */
+
+	if (chip->page_shift > 10) {
+		chip->ecc.size	    = 512;		/* add by huang */
+		chip->ecc.bytes	    = 13;		/* add by huang */
+	} else {
+		chip->ecc.size	    = 512;
+		chip->ecc.bytes	    = 3;
+		chip->ecc.layout    = &nand_hw_eccoob;
+	}
+}
+
+make menuconfig		//这里是注册ecc硬件读函数
+Device Drivers --->
+	<*> Memory Technology Device (MTD) support --->
+		<*> NAND Device Support --->
+			[*] Samsung S3C NAND Hardware ECC
+make uImage -j4
+
+调试,发现一开始:s3c2410_nand_update_chip里的
+		chip->ecc.size	    = 512;		/* add by huang */
+		chip->ecc.bytes	    = 13;		/* add by huang */
+一开始设置错误,所以卡死在VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+后来,把Samsung S3C NAND Hardware ECC 关闭了,即使用软件ecc读函数,但是,软件ecc读未修改到为s5pv210专用,
+所以启动后出现 uncorrect ecc error
+都修改后,然后成功启动了
+
+/**************************** SD/MMC *********************************/
+
+三星已经提供了支持 s5pv210 的 SD/MMC 的驱动:drivers/mmc/host/sdhci-s3c.c
+在 mach-smdkv210.c 中已经添加到 smdkv210_devices 设备列表:
+static struct platform_device *smdkv210_devices[] __initdata = {
+	&s3c_device_adc,
+	&s3c_device_cfcon,
+	&s3c_device_fb,
+	&s3c_device_hsmmc0,	//mmc设备0
+	&s3c_device_hsmmc1,	//...
+	&s3c_device_hsmmc2,
+	&s3c_device_hsmmc3,
+
+配置内核
+Device Drivers --->
+	<*> MMC/SD/SDIO card support --->
+		<*> Secure Digital Host Controller Interface support
+		<*> SDHCI platform and OF driver helper
+		<*> SDHCI support on Samsung S3C SoC
+		[*] DMA support on S3C SDHCI
+make uImage -j4
+
+调试:
+从sd卡启动成功后,拔出sd卡,串口中断有显示sd卡被拔出,sd卡在内里注册位mmcblk0设备,
+再次插入sd卡,显示注册了mmc设备
+cat /proc/partitions 后显示储存设备的分区注册状态
+mmcblk0 代表整个 SD 卡,mmcblk0p1 代表第 1 个分区
+挂载 SD 卡到 指定 目录(例如/sdcard)
+mkdir /sdcard
+mount -t vfat /dev/mmcblk0p1 /sdcard/	//-t 指定挂载格式为 vfat,SD 卡必须格式化为 fat 或者 fat32 格式
+					//否则会出现如下错误。mount: mounting /dev/mmcblk0p1 on mnt/ failed: Invalid argument
+linux 内核默认配置为支持 vfat 格式,另外用户也可以选择支持 NTFS 格式:
+配置内核
+File systems --->
+	<*> DOS/FAT/NT Filesystems --->
+		<*> NFT file system support
+
+添加脚本,实现自动挂载和卸载
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

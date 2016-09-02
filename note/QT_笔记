@@ -1,0 +1,1441 @@
+/********************************************************************/
+
+index:(Ctrl+f)
+	1,qt 纯C++架构
+	2,qt UI架构
+		2.1,UI类的重载使用
+		2.2,UI类的槽函数绑定
+		2.3,ComboBox的使用
+	3,qt qml架构
+	4,qt qml与C++交互
+	5,QScopedPointer 内存泄露等能优化系统的问题:
+	6,QTimer
+	7,qtcreator问题
+	8,Qt属性系统Q_PROPERTY详解
+	9,QWaitCondition 关于进程线程等待的类
+	10,QThread类
+	11,Qt Quick Scene Graph
+		QQuickItem类
+
+
+
+
+/********************************************************************/
+
+qt 纯C++架构:
+	1,main开始:若需要先初始化第三方库,然后QXXApplication()建立软件环境
+	  (注意所有可显示物(图标,窗口,旋钮,滑条,信信息栏)都为QWidget的子类)
+
+	2,配置主窗口,主窗口一定是程序员自定义的可显示物,而且一般直接衍生于Qwidget的子类  
+	  	例如:	class Player : public QWidget    //一个播放器软件自定义的主窗口类
+			Player(QWidget *parent = 0);     //主窗口类的构造函数声明
+			Player player1;                  //main函数定义的一个Player类对象,
+						   	   由于没有使用传递参数所以默认使用构造函数的*parent = 0
+						   	   意味着这是软件的最底显示层.就是独立的主窗口
+
+	3,然后我们会在此主窗口层配置其他各种功能可视物层,各种功能可视物层类的对象一般声明在对应父可视物层类(例主窗口层类)里,
+	  	例如一个开始按钮:Player类下有一项内容QPushButton *openButton;
+			即class Player : public QWidget
+			 {...
+			 	QPushButton *openButton;   //各种功能可视物层类的对象一般声明在对应父可视物层类
+			 ...}
+	  	在player()构造player1对象时,player1对象里包裹的*openButton对象
+	  	也通过player()构造函数嵌入的QPushButton()构造:
+	  	openButton = new QPushButton(tr("Open"), this).
+	  	QPushButton()构造函数:explicit QPushButton(const QString &text, QWidget *parent = Q_NULLPTR);	
+	  	(QPushButton是一个可显示物因此衍生于Qwidget,而这里*parent使用了this!!!,而非用默认的Q_NULLPTR,
+	   	所以,openButton这个可显示物是显示在player1上的,显示效果就是这是主窗口上的一个按钮)
+
+        4,捆绑功能,有了功能按钮等可工作显示物后,就得捆绑功能.
+	  	例如上述的open按钮:connect(openButton, SIGNAL(clicked()), this, SLOT(open()));
+	  	表示这个openButton的clicked()事件,会触发player1里的private slots:的open()槽函数事件.
+		(这里我们剖析下关系:QPushButton *openButton -> class Q_WIDGETS_EXPORT QPushButton : public QAbstractButton
+				-> class Q_WIDGETS_EXPORT QAbstractButton : public QWidget
+				-> QAbstractButton类含有void clicked(bool checked = false);
+		 所以QPushButton 可继承使用clicked(),QPushButton是QWidget的多重衍生类,所以openButton是一个可显示物)
+
+	5,布局主窗口的各种功能可视物层的摆放,一般主窗口类会有一个以上的(布局类)QXXXLayout类对象,布局内容博大精深,需要好好探究
+	  布局类并不衍生于Qwidget类,所以布局类对象一般不声明在可视物层类里,而是在构造函数里直接声明使用.
+		使用例如:我们建立了许多显示player1层上的各种功能可视物层;我们将他们好好布局,使显示效果美观.
+			player类构造函数里新建一个水平布局类对象:QHBoxLayout *layout = new QHBoxLayout
+                        	Player::Player(QWidget *parent)
+				{...
+					QHBoxLayout *layout = new QHBoxLayout  //布局类对象在构造函数里直接声明使用
+					layout->addWidget(spinBox);...
+				...}
+			layout里加入要布局的对象:layout->addWidget(spinBox);          //将spinbox加入到布局layout  
+   						layout->addWidget(slider);           //将slider加入到布局layout  
+						layout->addWidget(openButton);           //将openButton加入到布局layout
+			最后使用主窗口对象player1继承的setlayout(layout);完成布局.
+			(当然也有布局相互镶嵌的前框:QVBoxLayout *layout1 = new QVBoxLayout
+						   layout1->addWidget(slider1);           //将slider1加入到布局layout 
+						   layout->addWidget(layout);           //将layout这重布局加入到布局layout 
+			 最后使用主窗口对象player1继承的setlayout(layout1);完成布局.)	
+
+	6,配置好显示关系和建立功能关系后便生成可视架构:回到main执行player1.show();
+
+	7,最后执行软件:return app.exec();
+
+/********************************************************************/
+
+qt UI架构:
+	1,main开始:若需要先初始化第三方库,然后QXXApplication()建立软件环境
+	  (注意所有可显示物(图标,窗口,旋钮,滑条,信信息栏)都为QWidget的子类)
+
+	2,初始化一个自定义主窗口类的对象,相当于配置一个主窗口对象,而且自定义主窗口类一般直接衍生于QMainWindow的子类
+	  (QMainWindow直接衍生于Qwidget的子类)
+	  	例1:	class MainWindow : public QMainWindow    //自定义的主窗口类
+			explicit MainWindow(QWidget *parent = 0);   //主窗口类的构造函数声明
+			MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)    //主窗口类的构造函数定义
+			MainWindow w;      //main函数定义的一个Player类对象,
+					   //由于没有使用传递参数所以默认使用构造函数的*parent = 0,意味着这是软件的最底显示层.就是独立的主窗口
+	  	例2:	class Camera : public QMainWindow    //自定义的主窗口类
+			Camera(QWidget *parent = 0);    //主窗口类的构造函数声明
+			Camera::Camera(QWidget *parent) : QMainWindow(parent), ui(new Ui::Camera), camera(0), imageCapture(0), mediaRecorder(0), isCapturingImage(false), applicationExiting(false)    //主窗口类的构造函数定义
+			Camera camera;     //main函数定义的一个Player类对象,
+					   //由于没有使用传递参数所以默认使用构造函数的*parent = 0,意味着这是软件的最底显示层.就是独立的主窗口
+
+	3,由于使用UI架构,自定义主窗口类.h文件里开头处有声明UI命名空间
+		例1:	QT_BEGIN_NAMESPACE
+			class QLabel;
+			namespace Ui { class MainWindow;}
+			QT_END_NAMESPACE	
+		例2:	QT_BEGIN_NAMESPACE
+			namespace Ui { class Camera; }Qt Quick Scene Graph
+			QT_END_NAMESPACE
+
+	4,主窗口类里不需要声明功能可视物层类对象(替换地,要声明UI对象),但仍然要声明功能可视物对应的槽处理函数!
+		例1:	class Camera : public QMainWindow
+			{...
+			private:
+    				Ui::Camera *ui;
+			...}
+		例2:	class MainWindow : public QMainWindow
+			{...
+			private:
+				Ui::MainWindow *ui;
+			...}
+
+	5,设计ui,在ui设计界面设计窗口,就是把对应功能拖窗口,排版布局等!!
+	  关键在于对功能捆绑:纯c++架构一般是在主窗口类构造函数里完成signals与slot的connect,
+	  UI架构可以在UI设计里建立捆绑:UI设计页面 -> Edit Signal/Slots -> 拖动一功能可视层到自己主窗口层便出现signal/slots配置框 ->
+	  选中对应的signal与slot然后ok -> 重复步骤捆绑其他
+
+        6,主窗口类构造函数加入一项内容 ui->setupUi(this); 这样才能启动使用UI架构
+	  
+	7,配置好显示关系和建立功能关系后便生成可视架构:回到main执行player1.show();
+
+	8,最后执行软件:return app.exec();
+
+        另外:任意独立窗口类对象构建和运作,与主窗口类对象的构建和运作一样,
+		例如:
+			主窗口按A按钮弹出一新的另一种独立工作窗口类对象XXX.XXX有对应的窗口类和UI文件,
+			A按钮槽函数会初始化这个独立窗口类对象xxx,如 2 步骤,
+			xxx的文件内容配置, 如 3,4,5,6 步骤.
+			最后,A按钮槽函数执行xxx.exec(),从而建立一个独立进程来显示和运行起独立的xxx窗口的内容. //只是假设
+			如果,A按钮槽函数执行xxx.show(),则在同一进程里显示和运行起独立的xxx窗口的内容.       //只是假设
+		
+/********************************************************************/ 
+
+UI类的重载使用:
+	1,例
+	  	InputPlainTextEdit继承QPlainTextEdit类,QPlainTextEdit类是ui类,就是说InputPlainTextEdit也是ui类
+	  	InputPlainTextEdit重载了QPlainTextEdit类的一些功能,
+	  	使用:在mainwindow.ui里修改,先拖出一个QPlainTextEdit类对象的框架,
+	  	->右键->提升为->选InputPlainTextEdit->成功变为InputPlainTextEdit类对象
+
+/********************************************************************/
+
+UI类的槽函数绑定:
+	1,默认绑定://即不用程序员调优connect()函数,而实现的绑定
+	  例:
+		mainwindow.ui拖入一个QMainWindow窗口类对象MWindow
+		mainwindow.ui自形成一个UI_mainwindow.h:
+			class Ui_MWindow
+			{......
+			}
+			namespace Ui {
+    				class MWindow: public Ui_MWindow {};
+			} // namespace Ui
+		窗口文件MainWindow.h:
+			namespace Ui {
+				class MWindow;
+			}
+			class MainWindow : public QMainWindow
+			{
+				Ui::MWindow *ui;
+		窗口文件MainWindow.cpp
+			#include "ui_mainwindow.h"
+			MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),ui(new Ui::MWindow)
+			{...
+			}
+		最后main.cpp:
+			MainWindow w;
+		这时对象w的ui内容就是按mainwindow.ui标准构造的,
+		MWindow里拖入了一个QPushButton类按钮对象,命名为clearShowButton,即建立了一个QPushButton类对象clearShowButton
+		如果MainWindow类含有这种命名的槽函数,on_clearShowButton_clicked()
+		当构造对象w时,
+			w的ui里的clearShowButton 的clicked()信号 会自动绑定到  w的槽函数on_clearShowButton_clicked() 	
+	2,自定义绑定,
+		mainwindow.ui设计时,编辑->Edit signal/slot->进入信号与槽函数绑定设计模式,
+		点击一界面类A,拖到界面类B ->出现选框
+		选择A类一信号,选择B类一槽函数 ->确定
+		相当于建立了一connect()操作,
+		最MainWindow w;构建对象w时,会自动执行上述的connect()操作
+
+/********************************************************************/
+
+ComboBox的使用
+	1,例,
+		设置串口是,我们在ui界面里拖进一个combobox类,名为stopbitscombobox,即建立一个对象BaudRatecombobox,用来设置波特率
+		然后,我们在里面依次加入一列列内容 1200,
+						2400,
+						4800,
+						...
+						115200,
+		其实每一列的内容分别是序号 0,1,2,....的别名
+		当我们如见界面设为4800时,实际上stopbitscombobox里的当前index项指向2!!
+		所以combobox是通过给序号再命名来实现功能的
+		软件后台可以通过BaudRatecombobox->currentIndex()取出当前index项,根据值做处理
+		如:	switch(BaudRatecombobox->currentIndex()
+			{...
+			case 2:
+				boundrate = 4800;
+				break;
+			...)
+
+
+
+
+/********************************************************************/
+
+qt qml架构:
+	1,main开始:若需要先初始化第三方库,然后QXXApplication()建立软件环境
+	  (注意所有可显示物(图标,窗口,旋钮,滑条,信信息栏)都为QWidget的子类)
+
+	2, 一些自定义工作:
+		为一些C++类封装一个资料库qmlRegisterType,方便qml里的调用
+			例:qmlRegisterType<Person>("People",1,0,"Person");  
+			   把c++类person封入people资料库,  
+
+	3,
+/********************************************************************/
+
+qt qml与C++交互:
+
+QML与c++交互学习笔记(一):C++导出到QML的过程。
+1.导出一个简单的类Person
+2.具体导出过程:
+	假设我们要导出一个Person类，
+	A 那么就要考虑如何的一个类他才可以导出呢？
+		他需要符合一定的条件
+		1.继承自QObject
+		2.有默认构造函数
+	B 如何导出呢？
+		通过一个函数
+		int qmlRegisterType(const char *uri, int versionMajor, int versionMinor, const char *qmlName)
+		int qmlRegisterType()
+3.具体的例子
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+    public:  
+        explicit Person(QObject *parent = 0);  
+    };  
+    #endif // PERSON_H  
+       
+    // person.cpp  
+    #include "person.h"  
+    Person::Person(QObject *parent) :  
+        QObject(parent)  
+    {  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Person>("People",1,0,"Person");  
+        //qmlRegisterType<Person>();  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import People 1.0 //如果是qmlRegisterType<Person>(); 导出就可以注释这条
+Rectangle {
+    width: 640
+    height: 480
+    Person{}
+}
+
+说明:我们通过qmlRegisterType<Person>("People",1,0,"Person");
+向QML中导出Person类，这个类在People包中，在QML中需要使用Person类的
+话就必须包含People包，通过import People 1.0来包含，之后就可以使用Person
+创建对象使用来。
+
+ 
+
+
+
+QML与c++交互学习笔记(二)
+1.导出Person类中的成员方法
+2.具体导出过程
+	导出的方法有
+	1.使用Q_INVOKABLE
+	2.使用 槽机制
+3.具体代码
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+    public:  
+        explicit Person(QObject *parent = 0);  
+        Q_INVOKABLE void FirstEcho(void);  
+    public slots:  
+        void SecondEcho(void);  
+    };  
+    #endif // PERSON_H  
+
+// person.cpp
+    #include "person.h"  
+    Person::Person(QObject *parent) :  
+        QObject(parent)  
+    {  
+    }  
+    void Person::FirstEcho(void)  
+    {  
+        // 简简单单打印一句话  
+        qDebug("call Person::FirstEcho");  
+    }  
+    void Person::SecondEcho(void)  
+    {  
+        qDebug("call Person::SecondEcho");  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Person>("People",1,0,"Person");  
+        //qmlRegisterType<Person>();  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import People 1.0 //如果是qmlRegisterType<Person>(); 导出就可以注释这条
+Rectangle {
+    width: 640
+    height: 480
+    Person{ id: per;}
+    MouseArea{
+        anchors.fill: parent;
+        onClicked:{
+            per.FirstEcho();
+            per.SecondEcho();
+        }
+    }
+}
+
+这里导出了两个函数分别是FirstEcho 和SecondEcho 两个函数，这两个函数本别是使用
+FirstEcho使用使用 Q_INVOKABLE导出，
+SecondEcho直接使用槽。
+调用函数在控制台输出一些信息，这里是在鼠标点击界面后出发的。
+
+ 
+
+ 
+
+QML与c++交互学习笔记(三)
+1.导出Person类中的属性
+2.具体导出过程
+	1.导出Person一个颜色属性，一个int属性
+		注意
+		1. 当需要实现属性变化其他引用到此属性的属性也跟着变化的情况的话，需要设置属性相应的信号
+    		2. 设置属性的时候，使用的类型必须是已经导出到QML中的类型	
+3.具体代码
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    #include <QColor>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+        // 设置设置属性的名字是 bgcolor  
+        // 对应读取函数名字 bgColor  
+        // 对应写函数名字 setBgColor  
+        // 属性发生改变后发送信号 sendBgColorChange  
+        Q_PROPERTY(QColor bgcolor READ getBgColor WRITE setBgColor NOTIFY sendBgColorChange)  
+       // 设置设置属性的名字是 count  
+       // 对应读取函数名字 getCount  
+       // 对应写函数名字 setCount  
+       // 属性发生改变后发送信号 sendCountChange  
+       Q_PROPERTY(int count READ getCount WRITE setCount NOTIFY sendCountChange)  
+    public:  
+        explicit Person(QObject *parent = 0);  
+        QColor getBgColor(void) const;  
+        void setBgColor(const QColor& color);  
+        int getCount(void);  
+        void setCount(int count);  
+    signals:  
+        void sendBgColorChange(void);  
+        void sendCountChange(void);  
+    private:  
+        QColor  m_Color;  
+        int     m_Count;  
+    };  
+    #endif // PERSON_H  
+
+// person.cpp
+    #include "person.h"  
+    //---------------------------------  
+    //  
+    Person::Person(QObject *parent) :  
+        QObject(parent), m_Color("blue"), m_Count(0)  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    QColor Person::getBgColor(void) const  
+    {  
+        return m_Color;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setBgColor(const QColor& color)  
+    {  
+        m_Color = color;  
+        emit sendBgColorChange();  
+    }  
+    //---------------------------------  
+    //  
+    int Person::getCount(void)  
+    {  
+        return m_Count;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setCount(int count)  
+    {  
+        m_Count = count;  
+        emit sendCountChange();  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Person>("People",1,0,"Person");  
+        //qmlRegisterType<Person>();  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import People 1.0 //如果是qmlRegisterType<Person>(); 导出就可以注释这条
+Rectangle {
+    width: 640
+    height: 480
+    color: per.bgcolor;
+    Person{ id: per;}
+    Text {
+        id: textlabel;
+        text: "text  " + per.count;
+    }
+    MouseArea{
+        anchors.fill: parent;
+        onClicked:{
+            // 当鼠标按下后，由于属性上有信号，当属性发生改变后，
+            // 所有引用此属性的值的都相应的发生改变
+            per.bgcolor = "red";
+            per.count = 20;
+        }
+    }
+}
+
+在person类中，设置了两个属性bgcolor, count ,他们分别在发送改变后调用自己对应的信号
+具体看源代码，这里是设置来矩形框的颜色，文本框中文本。
+
+  
+
+ 
+
+QML与c++交互学习笔记(四)
+1.导出Person类，并且一个Job类，Job类包含一个Person的指针
+2.具体导出过程:通过属性来实现，具体的请看代码
+3.具体代码
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    #include <QColor>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+        // 设置设置属性的名字是 name  
+        // 对应读取函数名字 getName  
+        // 对应写函数名字 setName  
+        // 属性发生改变后发送信号 sendNameChange  
+        Q_PROPERTY(QString name READ getName WRITE setName NOTIFY sendNameChange)  
+       // 设置设置属性的名字是 age  
+       // 对应读取函数名字 getAge  
+       // 对应写函数名字 setAge  
+       // 属性发生改变后发送信号 sendAgeChange  
+       Q_PROPERTY(int age READ getAge WRITE setAge NOTIFY sendAgeChange)  
+    public:  
+        explicit Person(QObject *parent = 0);  
+        QString getName(void) const;  
+        void setName(const QString& name);  
+        int getAge(void);  
+        void setAge(int age);  
+    signals:  
+        void sendNameChange(void);  
+        void sendAgeChange(void);  
+    private:  
+        QString     m_Name;  
+        int         m_Age;  
+    };  
+    /* 
+     设想一份工作给予一个人 
+     */  
+    class Job : public QObject  
+    {  
+        Q_OBJECT  
+        Q_PROPERTY(Person *per READ getPerson WRITE setPerson NOTIFY sendPersonChange)  
+        Q_PROPERTY(QString jn READ getJobName WRITE setJobName NOTIFY sendJobNameChange)  
+    public:  
+        explicit Job(QObject *parent = 0);  
+        ~Job();  
+        void setPerson(Person *per);  
+        Person *getPerson(void) const;  
+        void setJobName(const QString & jobname);  
+        QString getJobName(void) const;  
+    signals:  
+        void sendPersonChange();  
+        void sendJobNameChange();  
+    private:  
+        Person *m_Person;  
+        QString m_JobName;  
+    };  
+    #endif // PERSON_H  
+
+// person.cpp
+    #include "person.h"  
+    //---------------------------------  
+    //  
+    Person::Person(QObject *parent) :  
+        QObject(parent), m_Name("unknow"), m_Age(0)  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    QString Person::getName(void) const  
+    {  
+        return m_Name;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setName(const QString& name)  
+    {  
+        m_Name = name;  
+        emit sendNameChange();  
+    }  
+    //---------------------------------  
+    //  
+    int Person::getAge(void)  
+    {  
+        return m_Age;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setAge(int age)  
+    {  
+        m_Age = age;  
+        emit sendAgeChange();  
+    }  
+    //---------------------------------  
+    //  
+    Job::Job(QObject *parent)  
+        :QObject(parent), m_Person(0), m_JobName("unknown")  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    Job::~Job()  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    void Job::setPerson(Person *per)  
+    {  
+        m_Person = per;  
+        emit sendPersonChange();  
+    }  
+    //---------------------------------  
+    //  
+    Person *Job::getPerson(void) const  
+    {  
+        return m_Person;  
+    }  
+    //---------------------------------  
+    //  
+    void Job::setJobName(const QString & jobname)  
+    {  
+        m_JobName = jobname;  
+        emit sendJobNameChange();  
+    }  
+    //---------------------------------  
+    //  
+    QString Job::getJobName(void) const  
+    {  
+        return m_JobName;  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Person>("People",1,0,"Person");  
+        //qmlRegisterType<Person>();  
+        qmlRegisterType<Job>("People",1,0,"Job");  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import People 1.0 //如果是qmlRegisterType<Person>(); 导出就可以注释这条
+Rectangle {
+    width: 640
+    height: 480
+    Job {
+        id: jobA;
+        jn: "Learn";
+        per: Person { id: ps; name: "Luly"; age: 25; }
+    }
+    // 显示这份工作的一些信息
+    Rectangle{
+        x: 100; y: 100;
+        width: 100; height: 100;
+        Text { text: "Job name:" + jobA.jn; }
+        Text { y: 20; text: "Person name:" + ps.name; }
+        Text { y: 40; text: "Person age:"  + ps.age; }
+    }
+    MouseArea{
+        anchors.fill: parent;
+        onClicked:{
+            // 我要改变工作的名字 工作人的信息
+            jobA.jn = "Clean House";
+            ps.name = "Tom";
+            ps.age = 30;
+        }
+    }
+}
+
+主要是导出了两个类Person和Job, Job 包含一个Person的指针，这样后，可以看到
+在QML中，我们需要给予Job对象一个Person来尽心赋值。
+
+ 
+
+ 
+
+QML与c++交互学习笔记(五)
+1.导出Person类，并且一个PersonGroup类，PersonGroup类是Person的一个组
+2.具体导出过程:通过属性来实现，具体的请看代码
+3.具体代码
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    #include <QDeclarativeListProperty>  
+    #include <QList>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+        Q_PROPERTY(QString name READ getName WRITE setName NOTIFY sendNameChange)  
+        Q_PROPERTY(int age READ getAge WRITE setAge NOTIFY sendAgeChange)  
+    public:  
+        explicit Person(QObject *parent = 0);  
+        QString getName(void) const;  
+        void setName(const QString& name);  
+        int getAge(void);  
+        void setAge(int age);  
+    signals:  
+        void sendNameChange(void);  
+        void sendAgeChange(void);  
+    private:  
+        QString     m_Name;  
+        int         m_Age;  
+    };  
+    class PersonGroup : public QObject  
+    {  
+        Q_OBJECT  
+        Q_PROPERTY(QDeclarativeListProperty<Person> members READ members)  
+    public:  
+        explicit PersonGroup(QObject *parent = 0);  
+        QDeclarativeListProperty<Person> members(void);  
+        Q_INVOKABLE int membersCount(void) const;  
+        Q_INVOKABLE Person *member(int index) const;  
+    private:  
+        QList<Person*> m_MemberList;  
+    };  
+    #endif // PERSON_H  
+
+// person.cpp
+    #include "person.h"  
+    //---------------------------------  
+    //  
+    Person::Person(QObject *parent) :  
+        QObject(parent), m_Name("unknow"), m_Age(0)  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    QString Person::getName(void) const  
+    {  
+        return m_Name;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setName(const QString& name)  
+    {  
+        m_Name = name;  
+        emit sendNameChange();  
+    }  
+    //---------------------------------  
+    //  
+    int Person::getAge(void)  
+    {  
+        return m_Age;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setAge(int age)  
+    {  
+        m_Age = age;  
+        emit sendAgeChange();  
+    }  
+    //---------------------------------  
+    //  
+    PersonGroup::PersonGroup(QObject *parent)  
+        :QObject(parent)  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    QDeclarativeListProperty<Person> PersonGroup::members(void)  
+    {  
+        return QDeclarativeListProperty<Person>(this, m_MemberList);  
+    }  
+    //---------------------------------  
+    //  
+    int PersonGroup::membersCount() const  
+    {  
+        return m_MemberList.size();  
+    }  
+    //---------------------------------  
+    //  
+    Person *PersonGroup::member(int index) const  
+    {  
+        return m_MemberList.at(index);  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Person>("People",1,0,"Person");  
+        //qmlRegisterType<Person>();  
+        qmlRegisterType<PersonGroup>("People",1,0,"PersonGroup");  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import People 1.0 //如果是qmlRegisterType<Person>(); 导出就可以注释这条
+Rectangle {
+    width: 640
+    height: 480
+    property int pgcurIndex: 0;
+    PersonGroup{
+        id: group;
+        members: [
+            Person { name: "A"; age: 20},
+            Person { name: "B"; age: 21},
+            Person { name: "C"; age: 22},
+            Person { name: "D"; age: 23},
+            Person { name: "E"; age: 24}
+        ]
+    }
+    // 显示这份工作的一些信息
+    Rectangle{
+        x: 100; y: 100;
+        width: 100; height: 100;
+        Text { id: text1;  text: ""}
+        Text { id: text2;  y: 20; text: ""}
+        Text { id: text3;  y: 40; text: ""}
+    }
+    MouseArea{
+        anchors.fill: parent;
+        onClicked:{
+            //if (pgcurIndex < group.membersCount() - 1){ // 这里两种方法都可以
+            if (pgcurIndex < group.members.length - 1){
+                pgcurIndex++;
+            }else{
+                pgcurIndex = 0;
+            }
+            // 显示信息
+            text1.text = "PersonGroup index: " + pgcurIndex;
+            var person = group.member(pgcurIndex);
+            text2.text = "Person name: " + person.name;
+            text3.text = "Person age: "  + person.age;
+        }
+    }
+}
+
+这里导出了两个类Person， PersonGroup， PersonGroup保存来一个Person的组，
+我们通过导出的函数来调用类面的成员，获取成员的信息.
+
+ 
+
+ 
+
+QML与c++交互学习笔记(六) 关于qt c++中创建对象，QML获取此对象数据问题
+1.假设
+	1.在c++中创建一个Person的对象，
+	2.在QML中获取并显示数据
+	3.在c++中改变数据后，显示的数据能进行相应的改变
+	(也就是说我们实际是在c++中new一个对象出来，而把这个对象的数据在QML里面进行显示)
+2.具体代码
+// person.h
+    #ifndef PERSON_H  
+    #define PERSON_H  
+    #include <QObject>  
+    #include <QDeclarativeListProperty>  
+    #include <QList>  
+    #include <QColor>  
+    class Person : public QObject  
+    {  
+        Q_OBJECT  
+        Q_PROPERTY(QString name READ getName WRITE setName NOTIFY sendNameChange)  
+        Q_PROPERTY(int age READ getAge WRITE setAge NOTIFY sendAgeChange)  
+    public:  
+        explicit Person(QObject *parent = 0);  
+        QString getName(void) const;  
+        void setName(const QString& name);  
+        int getAge(void);  
+        void setAge(int age);  
+        // 一个简单的函数, 获取蓝色  
+        Q_INVOKABLE QColor getColor(void) const;  
+        Q_INVOKABLE void changeNameAndAge(void);  
+    signals:  
+        void sendNameChange(void);  
+        void sendAgeChange(void);  
+    private:  
+        QString     m_Name;  
+        int         m_Age;  
+    };  
+    #endif // PERSON_H  
+
+// person.cpp
+    #include "person.h"  
+    //---------------------------------  
+    //  
+    Person::Person(QObject *parent) :  
+        QObject(parent), m_Name("unknow"), m_Age(0)  
+    {  
+    }  
+    //---------------------------------  
+    //  
+    QString Person::getName(void) const  
+    {  
+        return m_Name;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setName(const QString& name)  
+    {  
+        m_Name = name;  
+        emit sendNameChange();  
+    }  
+    //---------------------------------  
+    //  
+    int Person::getAge(void)  
+    {  
+        return m_Age;  
+    }  
+    //---------------------------------  
+    //  
+    void Person::setAge(int age)  
+    {  
+        m_Age = age;  
+        emit sendAgeChange();  
+    }  
+    //---------------------------------  
+    //  
+    QColor Person::getColor(void) const  
+    {  
+        return QColor(Qt::blue);  
+    }  
+    //---------------------------------  
+    //  
+    void Person::changeNameAndAge(void)  
+    {  
+        setName("Luly");  
+        setAge(31);  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include <QtDeclarative/QDeclarativeContext>  
+    #include "person.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        Person tmpPerson;  
+        tmpPerson.setName("Tom");  
+        tmpPerson.setAge(25);  
+        QDeclarativeView qmlView;  
+        qmlView.rootContext()->setContextProperty("ps",&tmpPerson);  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+Rectangle {
+    width: 640
+    height: 480
+    Text { text: "Person name:" + ps.name; }
+    Text { y: 20; text: "Person age:" + ps.age; }
+    Rectangle{ x: 20; y: 40;  width: 20; height: 20; color: ps.getColor();}
+    MouseArea{
+        anchors.fill: parent;
+        // 当鼠标按下后改变名字和年龄
+        onClicked: { ps.changeNameAndAge(); }
+    }
+}
+
+我们在c++中创建来一个对象，并且在把这个对象导出给QML调用用，我们设置来属性，QML中可以直接使用属性来进行赋值.
+
+
+
+ 
+
+QML与c++交互学习笔记(七)
+1.假设这样一种情况
+	我这里由一个Wideget 继承自QWidget上面添加来一个QLabel, 一个QPushButton
+	我如何把这个Wideget放到QML中使用，那么我当QPushButton 按下后我怎么在QML中进行处理呢？
+	我这里指出一种方法
+	让Wideget 继承QGraphicsProxyWidget，对Wideget进行导出，在QML中创建此对象，在他导出的信中进行处理,具体代码。
+	还有就是这个网址上说明来很多QML与c++之间通讯的方法，很悲剧的是我的assistant中却没有者部分，不知道版本低还是怎么的。
+	http://doc.qt.nokia.com/4.7-snapshot/qtbinding.html
+2.具体代码
+//widget.h
+    #ifndef WIDGET_H  
+    #define WIDGET_H  
+    #include <QWidget>  
+    #include <QGraphicsProxyWidget>  
+    #include <QPushButton>  
+    #include <QLabel>  
+    #include <QLineEdit>  
+    class Widget : public QGraphicsProxyWidget  
+    {  
+        Q_OBJECT  
+    public:  
+        explicit Widget(QGraphicsItem *parent = 0);  
+        ~Widget();  
+        Q_INVOKABLE void changeText(const QString& s);  
+    signals:  
+        void sendOnButton(void);  
+    private:  
+        QPushButton *m_Btn;  
+        QLabel      *m_Label;  
+        QWidget     *m_MainWidget;  
+    };  
+    #endif // WIDGET_H  
+
+//widget.cpp
+    #include "widget.h"  
+    Widget::Widget(QGraphicsItem *parent) :  
+        QGraphicsProxyWidget(parent)  
+    {  
+        m_MainWidget = new QWidget;  
+        m_Btn = new QPushButton(m_MainWidget);  
+        m_Label = new QLabel(m_MainWidget);  
+        m_Btn->setText("PushButton");  
+        m_Btn->setGeometry(10, 10, 100, 30);  
+        m_Label->setGeometry(10, 40, 200, 30);  
+        QObject::connect(m_Btn, SIGNAL(clicked()), this, SIGNAL(sendOnButton()));  
+        setWidget(m_MainWidget);  
+    }  
+    Widget::~Widget()  
+    {  
+        delete m_MainWidget;  
+    }  
+    void Widget::changeText(const QString& s)  
+    {  
+        m_Label->setText(s);  
+        qDebug(" call Widget::changeText");  
+    }  
+
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include <QtDeclarative/QDeclarativeContext>  
+    #include "widget.h"  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        qmlRegisterType<Widget>("UIWidget", 1, 0, "Widget");  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        return a.exec();  
+    }  
+
+// UICtest.qml
+import Qt 4.7
+import UIWidget 1.0
+Rectangle {
+    width: 640
+    height: 480
+    color: "black"
+    Widget { id: uiwidget; x: 100; y: 100; width: 400; height: 100;
+        // 关键在这里，当一个信号导出后他的相应的名字就是第1个字母大写，前面在加上on
+        // 例如 clicked -- onClicked   colorchange --onColorchange;
+        onSendOnButton: { uiwidget.changeText(textinput.text); }
+    }
+    Rectangle{
+        x: 100; y: 20; width: 400; height: 30;  color: "blue"
+        TextInput {id: textinput; anchors.fill: parent; color: "white" }
+    }
+}
+
+这里实现的是当QPushButton按钮按下后，获取QML中TextInput上的文本，
+对QLabel进行设置，关键点在于Widget中的信号函数sendOnButton, 他导出后在QML中
+将引发的是onSendOnButton 只要在QML中对这个编写处理就可以实现，具体看代码。
+
+ 
+
+ 
+
+QML与c++交互学习笔记(八) qt c++直接调用QML中的函数, 直接设置属性
+1.这里主要是介绍，如何在c++中调用QML中的函数和设置QML中的属性的问题
+2.具体代码
+// UICtest.qml
+import Qt 4.7
+Rectangle {
+    id: mainWidget;
+    width: 640
+    height: 480
+    function callbyc(v)
+    {
+        mainWidget.color = v;
+        return "finish";
+    }
+    Rectangle{
+        id: secondRect;
+        x: 100;
+        y: 20;
+        width: 400;
+        height: 300;
+        Rectangle{
+            x: 10;
+            y: 20;
+            width: 30;
+            height: 40;
+            color: "#FF035721"
+            Text  {
+                objectName: "NeedFindObj";
+                anchors.fill: parent;
+                text: "";
+            }
+        }
+    }
+}
+ 
+// main.cpp
+    #include <QtGui/QApplication>  
+    #include <QtDeclarative/QDeclarativeView>  
+    #include <QtDeclarative/QDeclarativeEngine>  
+    #include <QtDeclarative/QDeclarativeComponent>  
+    #include <QtDeclarative/QDeclarativeContext>  
+    #include <QtDeclarative/QDeclarativeItem>  
+    #include <QMetaObject>  
+    int main(int argc, char *argv[])  
+    {  
+        QApplication a(argc, argv);  
+        QDeclarativeView qmlView;  
+        qmlView.setSource(QUrl::fromLocalFile("../UICtest/UICtest.qml"));  
+        qmlView.show();  
+        // 获取根节点，就是 QML中 id是mainWidget的节点  
+        QDeclarativeItem *item = qobject_cast<QDeclarativeItem*>(qmlView.rootObject());  
+        item->setProperty("color", QVariant("blue"));  
+        // 查找到我们需要的节点根均objectname NeedFindObj 来获得，并设置他的文本属性  
+        QDeclarativeItem *item1 = item->findChild<QDeclarativeItem *>("NeedFindObj");  
+        if (item1)  
+        {  
+            item1->setProperty("text", QVariant("OK"));  
+        }  
+        // 调用QML中的函数, 分别是 函数所在的对象， 函数名，返回值， 参数  
+        QVariant returnVar;  
+        QVariant arg1 = "blue";  
+        QMetaObject::invokeMethod(item, "callbyc",  
+                                  Q_RETURN_ARG(QVariant, returnVar),Q_ARG(QVariant, arg1));  
+        qDebug(" %s",returnVar.toString().toLocal8Bit().data());  
+        return a.exec();  
+    }  
+
+这里的根节点是id为mainWidget的矩形元素，那么在C++中获取根节点后就可以，
+直接的设置他的属性了。其他属性也可以同样,调用指定节点内的函数是通过QMetaObject中的invokeMethod 来进行调用的。
+
+最后所有关于QML和c++交互部分就基本写完，如果想要更多的东西，或者一些其他方法，强烈看看
+http://doc.qt.nokia.com/4.7-snapshot/qtbinding.html，或者帮助文档，（究竟是不是我的文档里面没有还是怎么的）
+
+/********************************************************************/ 
+
+QScopedPointer 内存泄露等能优化系统的问题:
+	主要用于解决和防止内存泄露等能优化系统的问题,以下是声明的一部分内容:
+		template <typename T, typename Cleanup = QScopedPointerDeleter<T> >
+		class QScopedPointer
+	直观例子:
+		例子1
+		QGuiApplication app(argc, argv);
+ 		QScopedPointer<QWindow> window;
+ 		window.reset(new WindowMultiThreaded); or window.reset(new WindowSingleThreaded);
+ 		window->resize(1024, 768);
+ 		window->show();
+ 		return app.exec();
+ 		例子2
+ 		QGuiApplication app(argc, argv);
+ 		WindowSingleThreaded window;
+ 		window.resize(1024, 768);
+ 		window.show();
+ 		return app.exec();
+		两例效果一样,但使用QScopedPointe例子更好解决内存泄露等系统性问题.	
+
+/********************************************************************/
+ 
+QTimer:
+	定时器事件,定时器事件一般定义在主窗口类对象,直观例子1:
+		id1 = startTimer(1000);   //主窗口类对象直接使用继承的startTimer()开启定时器
+		id2 = startTimer(1000);   //开启多个定时器,意味着多个定时器事件 
+		void 主窗口类::timerEvent(QTimerEvent *event)  //复写主窗口类继承的定时器事件执行函数,
+		{                                              //所有时间事件计时器溢出时统一跳转此函数
+    			if(event->timerId() == id1) //判断若是计数器id1溢出,则执行id1定时器事件         
+    			{..}
+    			if(event->timerId() == id2) //判断若是计数器id2溢出,则执行id2定时器事件 
+    			{..}
+		} 
+	直观例子2:
+		private slots:  void timerUpdate();   //主窗口类包含的槽函数用于定时器事件执行函数
+		QTimer *timer = new QTimer(this);     //主窗口类对象建立一个本地计时器
+		connect(timer, SIGNAL(timeout()), this, SLOT(timerUpdate()));  //配置定时器溢出时执行定时器事件执行函数
+	        timer->start(1000);   //设定时间并开启定时器
+		timer->stop();        //关闭定时器
+	直观例子3:(只运行一次的定时器事件)
+		private slots:  void timerUpdate();   //主窗口类包含的槽函数用于定时器事件执行函数
+		QTimer::singleShot(10000, this, SLOT(timerUpdate())); //10s后执行一次timerUpdate()
+
+/********************************************************************/
+
+qtcreator问题:
+	寻找替换:Ctrl+f
+	Qt moc:Parse error at "std"问题:(原因Qt编译器不能自动查找STL的头文件)
+		1,找到QT配置文件: /opt/Qt5.6.0/5.6/gcc_64/mkspecs/qconfig.pri
+		2,sudo vim 打开,然后在QMAKE_DEFAULT_INCDIRS = (这处加入gcc库的目录,例:) /usr/include/c++/4.8 /usr/include/x86_64-linux-gnu/c++/4.8 /usr/include/c++/4.8/backward /usr/lib/gcc/x86_64-linux-gnu/4.8/include /usr/local/include /usr/lib/gcc/x86_64-linux-gnu/4.8/include-fixed /usr/include
+		2,查找gcc库的目录 /usr/lib/gcc/x86_64-linux-gnu/4.8/cc1plus -v n
+		3,error: ‘class QString’ has no member named ‘toAscii’ 
+		  soluction: Added this to the .pro file:
+			QT += widgets
+			DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x000000`
+		4,出现这样子编译错误的:/bin/sh: 1: Syntax error: "(" unexpected
+					make: *** [main.o] Error 2
+					12:30:11: 进程"/usr/bin/make"退出，退出代码 2 。
+					Error while building/deploying project Qt_camera_demo4 (kit: Desktop Qt 5.6.0 GCC 64bit)
+					When executing step "Make"
+		   soluction:项目文件夹路径不能出现 () 汉子等其他符号.
+		5,无法找到库问题(例如找不到opencv):
+		  soluction:在.pro文件加入
+				CONFIG += link_pkgconfig
+				PKGCONFIG += opencv
+		  来替代加入INCLUDEPATH和LIBS
+		6,error: 'Qt3D' is not a namespace-name 说明没有这个namespace-name,估计是软件更新更改名字了,
+		  这时同时也会出现在旧版命名空间Qt3D定义用不到的情况error: 'QQmlAspectEngine' was not declared in this scope
+		  也发现 error: 'Quick' is not a namespace-name
+		  我们从#include <QQmlAspectEngine>找到QQmlAspectEngine类的声明文件
+		  发现QQmlAspectEngine在命名空间quick里,而quick命名空间又在命名空间Qt3D里,
+			最后把: using namespace Qt3D;
+    				using namespace Qt3D::Quick;
+			改写为: using namespace Qt3DCore;
+    				using namespace Qt3DCore::Quick;
+		7,error: expected type-specifier before 'QInputAspect'表示QInputAspect这个类没有被定义,
+		  但是我们却发现了有#include <QInputAspect>,这时在声明文件发现是在命名空间Qt3DInput里定义,
+			所以改法:在QInputAspect应用前先补行using namespace Qt3DInput;
+		8,error:cannot allocate an object of abstract type“Posix_QextSerialPort” 
+			在基类中申明的虚函数，在派生类中必须继承并实现。在new一个派生类时才不会报该错误。
+			Posix_QextSerialPort是QextSerialPort的子类,
+			QextSerialPort.h声明了一个虚函数,settimeout(),QextSerialPort.cpp没有定义函数,
+			而且Posix_QextSerialPort也没有声明和定义settimeout();所以执行Posix_QextSerialPort的构造函数出错
+		10,error: 'itoa' was not declared in this scope
+			可能是stdlib.h内容换代了,用gcvt取代itoa
+	Qt opencv 问题:
+		1,查找opencv库路径:echo $(pkg-config --libs opencv)
+		2,关于无法找到opencv库问题:在.pro计入:
+		       INCLUDEPATH += /usr/local/include/opencv \
+               			/usr/local/include/opencv2 \
+               			/usr/include/c++/4.8 \
+               			/usr/include \
+		        LIBS += -L/usr/local/lib \
+    				-lopencv_core \
+   				-lopencv_imgproc \
+    				-lopencv_highgui \
+    				-lopencv_photo \
+	Qt opengl 问题:
+		1,除了gl函数,使用到glu函数:
+			.pro添加:
+				QT += opengl
+				LIBS = -lGLU 
+			相关h,或c,或cpp添加头`:
+				#include <QtOpenGL>
+				#include <GL/glu.h>
+		2,除gl,glu还更要使用到glut函数:
+			.pro添加:
+				QT += opengl
+				LIBS = -lGLU 
+				鼠标右击->添加库—>外部库—>下一步；—>浏览—>/usr/lib/x86_64-linux-gnu/libglut.so—>找开—>下一步—>完成，
+			相关h,或c,或cpp添加头`:
+				#include <QtOpenGL>
+				#include <GL/glu.h>
+				#include <GL/glut.h>		
+
+	qt4与qt5的include路径有区别!! 本机qt.6include路径: /opt/QT5.6/5.6/gcc_64/include
+
+/********************************************************************/
+
+Qt属性系统Q_PROPERTY详解:
+	1,声明属性: Q_PROPERTY(type name READ getFunction WRITE setFunction RESET resetFunction NOTIFY notifySignal
+				DESIGNABLE bool SCRIPTABLE bool STORED bool USER bool CONSTANT FINAL)
+	  	例如:
+		class CameraPlayer : public QQuickItem
+		{
+			Q_OBJECT
+   			Q_PROPERTY(bool player READ play WRITE setPlay NOTIFY playChanged)  //声明了player属性,以及相关处理函数
+		......	
+		再例如:
+			Q_PROPERTY(bool focus READ hasFocus)  
+			Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled)  
+			Q_PROPERTY(QCursor cursor READ cursor WRITE setCursor RESET unsetCursor)
+		一个属性的行为就像类的数据成员，但是它还具有附加的特性，这些特性可以被元数据对象系统操作。这些特性是：
+		1,需要一个READ访问器函数。用于读属性的值。理想情况下，有一个不变的函数用于此目的，并且它必须返回属性的类型的值或指针或引用。
+		  例如，QWidget::focus是一个只读的属性，它对应一个读函数：QWidget::hasFocus()。
+		2,一个可选的WRITE访问器函数。它用于设置属性的值。它必须返回空并且至少具有一个参数，参数是属性类型的值或指针或引用。例如:
+		  QWidget::enabled具有WRITE函数QWidget::setEnable()。只读属性不需要写函数。例如，QWidget::focus没有对应的写函数。
+		3,一个可选的RESET函数。用于设置属性的值到它的默认值。例如：QWidget::cursor具有典型的READ和WRITE函数，QWidget::cursor()
+		  和QWidget::setCursor()，并且它也具有一个RESET函数，QWidget::unsetCursor()。RESET函数必须返回void并且不带有任何参数。
+		4,一个可选的NOTIFY信号。如果被定义了，信号将在属性的值改变时发出。信号必须带有一个参数，这个参数的类型必须与属性相同；
+		  参数保存的是属性的新值。
+		5,一个DESIGNABLE变量表明此属性是否在界面设计器的属性编辑器中出现。大多数属性是可见的，除了为这个变量传入true或false，
+		  你还可以指定一个bool型的成员函数。
+		6,SCRIPTABLE变量表明这个属性是否可以被一个脚本引擎操作（默认是true）。你也可以赋予它true或false或bool型函数。
+		7,STORED变量表明了属性是否被认为是独立存在还是依赖于其它的值而存在。它也表明是否在保存对象状态时保存此属性的值。大多数
+		  属性都是需要保存的，但是，如QWidget::minimumWidth()就是不被保存的，因为它的值是从另一个属性QWidget::minimumSize()得来的。
+		8,USER变量表明属性是否被设计为面向用户的或用户可修改的类属性。通常，每个类只有一个USER属性。例如，QAbstractButton::checked是
+		  按钮类的用户可修改属性。注意QItemDelegate获取和设置widget的USER属性。
+		9,CONSTANT的出现表明属性的值是不变的。对于一个object实例，常量属性的READ方法在每次被调用时必须返回相同的值。此常量值
+		  可能在不同的object实例中不相同。一个常量属性不能具有WRITE方法或NOYIFY信号。
+		10,FINAL变量的出现表明属性不能被派生类所重写。有些情况下，这可以用于效率优化，但不是被moc强制的。程序员必须永远注意
+		  不能重写一个FINAL属性。
+		(未完待续)   
+
+
+	2,声明了的属性的使用:
+	  	例如:
+		qmlRegisterType<CameraPlayer>("CameraPlayer", 1, 0, "CameraPlayer");  //把CameraPlayer类注册到CameraPlayer 1.0资料库
+		然后可以在qml里使用:
+			CameraPlayer {
+					id: camera
+        				width: 350
+        				height: 240	
+        				player:true     //使用被声明的属性.
+				     }	  	
+
+/********************************************************************/
+
+QWaitCondition 关于进程线程等待的类:
+
+
+
+
+/********************************************************************/
+
+QThread类:
+	1,线程之间共享数据，但又单独执行；QT线程QThread是平台无关的；
+	  通常主线程从main开始执行，而在主线程中创建其他线程，其他线程派生于QThread
+	2,线程优先级总共8个优先级：线程优先级从上到下越来越高。
+		QThread::IdlePriority         0 scheduled only when no other threads are running. 
+		QThread::LowestPriority       1 scheduled less often than LowPriority. 
+		QThread::LowPriority          2 scheduled less often than NormalPriority. 
+		QThread::NormalPriority       3 the default priority of the operating system. 
+		QThread::HighPriority         4 scheduled more often than NormalPriority. 
+		QThread::HighestPriority      5 scheduled more often than HighPriority. 
+		QThread::TimeCriticalPriority 6 scheduled as often as possible. 
+		QThread::InheritPriority      7  use the same priority as the creating thread. This is the default.
+	3,线程管理:
+		线程启动:void start( Priority priority = InheritPriority ) 启动线程执行，启动后会发出started信号。
+		线程执行:int exec () 进入线程eventloop
+			 virtual void run () 线程入口。
+		线程退出:void quit () 相当于exit(0)
+			 void exit ( int returnCode = 0 ) 调用exit后，thread将退出event loop，并从exec返回，exec的返回值就是r
+							   通常returnCode=0表示成功，其他值表示失败。
+			 void terminate () 结束线程，线程是否立即终止取决于操作系统。线程被终止时，所有等待该线程Finished的线程都将被唤醒。
+					   terminate是否调用取决于setTerminationEnabled ( bool enabled = true )开关。
+		线程等待:void msleep ( unsigned long msecs ) 
+			 void sleep ( unsigned long secs ) 
+			 void usleep ( unsigned long usecs ) 
+			 bool wait ( unsigned long time = ULONG_MAX ) 线程将会被阻塞，等待time毫秒。和sleep不同的是，如果线程退出，则wait会
+		线程状态:bool isFinished () const 线程是否已退出。
+			 bool isRunning () const 线程是否还处于运行态。
+		线程属性:Priority priority () const 
+			 void setPriority ( Priority priority ) 
+			 void setStackSize ( uint stackSize ) uint stackSize () const 
+			 void setTerminationEnabled ( bool enabled = true ) 设置是否响应terminate()
+	4,例子:
+		class MyThread : public QThread 
+		{
+		protected:
+			void run();  /* 重载run */
+ 		};
+		void MyThread::run()
+		{
+			QTcpSocket socket;
+			socket.connectToHost(hostName, portNumber); /* 建立tcp连接 */
+			exec();    /* 进入事件循环*/
+ 		}
+		int main()
+		{
+		MyThread thread;    /* 使用新创建的thread */
+		thread.start();     /* thread会执行run()，建立tcp连接并进入事件循环，直到thread终止退出事件循环 */
+		thread.wait();      /* 等待thread退出 */
+		return 0;
+		} 
+		/*从QThread派生类时，需要重新实现QThread的虚函数run。
+		  void QThread::run () [virtual protected]   该函数是线程的入口，当我们使用start()启动线程时，新线程就会执行run()。
+		  默认的run()函数就仅仅调用了exec()进入事件循环。*/
+		当然，定义自己的线程run()时，也可以不使用事件循环，例如:
+			class Thread : public QThread
+			{
+				Q_OBJECT
+			public:
+				Thread();
+				void setMessage(const QString &message);
+				void stop();
+			protected:
+				void run();
+			private:
+				QString messageStr;
+				volatile bool stopped;
+			};
+			Thread::Thread()
+			{
+				stopped = false;
+			}
+			void Thread::run()
+			{
+				while(!stopped)  /* 该thread就没有用到exec()进入事件循环 */
+					std::cerr <<qPrintable(messageStr);
+				stopped = false;
+				std::cerr << std::endl;
+			}
+			void Thread::stop()
+			{
+			stopped = true;
+			}
+	5,子线程能访问的内容:
+		子线程可以访问的数据 与 数据所属的类是不是子线程的类 无关.
+		子线程只会运run()函数的内容,允许在run()函数里跳转其他地方函数运行,因为还会返回到未结束run()函数里
+		但是,run()的结束也意味着子线程的结束
+
+/********************************************************************/
+Qt Quick Scene Graph:
+	1,qt5后推崇的全新的渲染底层,兼容opengl使用.用于跟简单显示内容,用户一般把要显示的内容设置放在QQuickItem::updatePaintNode()里
+	  不需要自己写显示图形的实现函数,scene graph渲染系统会自己实现.
+	2,scene graph 系统要显示的内容是在updatePaintNode()里建立或更新的内容节点内容node,可以说各种node是scene graph里的显示内容基本单元
+	3,QQuickItem类对象建立了一个显示内容架构,没有执行显示内容的函数,而执行显示动作的是QQuickItem里重写的updatePaintNode(),
+	  而显示的内容则是各种建立好的,赋予了内容的,修改了内容的,作为索引的内容节点node实现的.
+	  当用户把具体的内容放入了node指向的空间,执行node->markDirty(QSGNode::DirtyGeometry)时,便会通知渲染系统层执行显示内容到屏幕的操作.
+	  最后返回这次的内容节点给Qt系统,作为下一次的updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)里的oldnode参数内容
+          下一次的updatePaintNode()时,会输入上次的node,把node指向的内容修改了下又执行node->markDirty(QSGNode::DirtyGeometry)来更新屏幕信息
+	  周而复始,屏幕呈现动态内容.
+
+/********************************************************************/
+
+QQuickItem类:
+	1,在setFlag(ItemHasContents, true);后,QQuickItem::update()才可以转到QQuickItem::updatePaintNode()函数
+	  否则,QQuickItem::update()并没有任何作用;另外updatePaintNode()可以重写!!
+		
+	2,在QML中，可视化的基础组件是Item，不可视化的就是QtObject，它们对应C++中的QQuickItem和QObject类，
+	  扩展QML组件一个继续基于QML中的Item扩张，还有就是继承QQuickItem，我们想把opencv加到QML中，那么只有继承QQuickItem了。
+	  怎么使用，那还要看QML新的渲染机制，Qt5的QML渲染基于OpenGL，其场景的渲染在单独的线程进行，
+	  我们需要需要QQuickItem返回能够描述场景的对象，就是QSGNode。实现QQuick的updatePaintNode函数就OK了，
+	  我们在updatePaintNode，描述怎么渲染。
+
+
+
+
+  

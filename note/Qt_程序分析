@@ -1,0 +1,726 @@
+/********************************************************************/
+
+index
+	1,Qt_camera_demo4_opencv(未完)
+	2,Qt_camera_demo11(未完)
+	3,Qt_camera_demo9_success
+	4,Qt_serialport_demo2_success
+	5,Qt_quadcopter_success(未完)
+
+
+
+
+
+
+
+
+
+/********************************************************************/
+
+/home/kingders/c/Qt_camera_demo4_opencv 调试
+
+160627	1,QImage::setPixel: coordinate (640,4) out of range 问题:
+		暂时认为是 QOpenCVWidget.cpp:154 image.setPixel(x,y,qRgb(red, green, blue));
+					    改为 image.setPixel(x-1,y-1,qRgb(red, green, blue));
+	2,HIGHGUI ERROR: V4L/V4L2: VIDIOC_S_CROP 问题:
+		本认为是未装v4l/v4l2,但装后仍失败!
+
+/********************************************************************/	
+
+/home/kingders/c/Qt_camera_demo11 调试
+
+160627	1,close()一类标准函数的头文件:#include <unistd.h 
+	2,成功运行,但是打开摄像头仍然失败
+
+/********************************************************************/
+
+/home/kingders/c/Qt_camera_demo9_success/v4l2-tester-master/qt 调试
+
+160628	1,运行阶段一:(这是一个qml架构应用程序)//主线程
+		把c++类CameraPlayer封入CameraPlayer 1.0资料库(同名CameraPlayer指代的事物不一样),  
+		->QQuickView viewer 新疆一个QQuickView类对象,
+		->viewer.setSource(QUrl("qrc:///main.qml")) QQuickView类对象绑定到指定主qml文件,这时便转到并执行qml架构的初始化!!
+
+	2,运行阶段二:(从main.qml开始初始化,见main.qml)//主线程
+		开头import QtQuick 2.2, QtQuick.Window 2.1, CameraPlayer 1.0 相关资料库
+		Rectangle初始化一个长方体区域主窗口父对象并设定width,height,color属性,
+		Rectangle父对象下再建立三个子对象:CameraPlayer(即封入CameraPlayer 1.0资料库的CameraPlayer类对象),
+						 Timer(时间触发器对象),
+						 NumberAnimation(帧动画对象)
+		//最后我修改了,并没有建立Timer(时间触发器对象),NumberAnimation(帧动画对象),因为没有显著作用
+		//Rectangle估计是QtQuick 2.2资料库里的类,而且这类继承了QQuickItem ??
+
+	3,CameraPlayer类对象构建://主线程
+		1,CameraPlayer类继承QQuickItem类,所以是一个可显示对象,是一个Rectangle窗口父对象下显示的一个子对象,也先初始化一些内容:
+			mPlay = false; 
+			mBoundChanged = true; 
+			mTextureChanged = true;
+		        x: 20
+        		y: 30
+        		width: 640
+        		height: 480
+			//注意这里由于继承QQuickItem,所以qml的x,y,width,height属性其实也是CameraPlayer类对象初始化的内容,
+			//然而,这些是将被传递要使用到的参数并不表示,现在就已经建立了一个符合x,y,width,height的已经在显示的图形窗口框!!
+			//这时,除了窗口rectangle在显示外,窗口里面并没有显示其他内容.
+		2,setFlag(ItemHasContents, true )作用?以下为一网上参考
+		  (在CameraPlayer的构造函数，我们通过设定setFlag(ItemHasContents, true );来告诉Scene Graph，此项目有内容，
+		   需要调用updatePaintNode()函数，然后当source改变的时候，为了调用相应的处理函数，
+		   需要连接处理器。这里的核心就是updatePaintNode()函数.)
+		3,把xchanged,ychanged,widthchanged,heightchanged信号绑定槽boundchanged()(mBoundChanged = true;update();)
+		4,初始化camera:mCamera = new PCCamera(this);PCCamera类继承Camera,Camera继承QThread,QThread继承QObject,
+		  同时,CameraPlayer类继承QQuickItem,QQuickItem类继承QObject,所以this指针指代的是CameraPlayer的QObject部分
+		  初始化PCCamera同时也初始化了被继承的camera的内容:
+			CAPTURE_DEVICE = "/dev/video0";
+    			m_image = new ImageStream(640, 480);
+				m_image->front_index = 0; 
+				m_image->updated = false; 
+				m_image->m_width = 640; 
+				m_image->m_height = 480;
+				uchar *data[2];
+				m_image->data[0] = new uchar[640 * 480 * 3];//用来放显示图片内容
+				m_image->data[1] = new uchar[640 * 480 * 3];//用来放显示图片内容
+			m_texture = 0; //纹理索引
+      			frame_count = 0; 
+			frame_devisor = 1; 
+			m_running = false; //控制是否把camera抓取的图像更新到监视器程序
+      			m_node = 0;
+			videodev.fd = -1;
+		  把Camera::imageChanged信号绑到槽CameraPlayer::textureChanged
+		  (imageChanged()是一个信号,运行时是Camera::updateTexture执行emit imageChanged();然后触发CameraPlayer::textureChanged())
+		5,初始camera都做好了变可以启动,因为camera继承QThread是一进程类,最后mCamera->start();启动camera的线程.
+		  //至此主线程完成了全部初始化工作,
+
+	4,运行阶段三//主线程
+	  主线程最后执行viewer.show();显示内容
+          执行app.exec();重复运行,假如没有这个,程序把主线程要执行的内容执行一次然后结束,即执行完viewer.show()后结束,
+	  现象为桌面闪出一个窗口后又马上消失了.然而执行exec后,主线程继续执行重复的常规动作保持程序运行
+	  //后来发现不能用while(1);简单代替app.exec(),不是那么简单.app.exec()除了要处理常规重复执行外,也要处理过程中信号和槽中断等关系???
+
+	5,mCamera->start()后生成一新线程,新线程转移到Camera::run()//camera线程
+		->Camera::initCapture()//初始化相机
+		->Camera::startCapture()
+			a = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			ret = ioctl(videodev.fd, VIDIOC_STREAMON, &a);
+		while(1) Camera::captureFrame()
+			struct v4l2_buffer buf; memset(&buf, 0, sizeof(buf)); buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			buf.memory = V4L2_MEMORY_USERPTR;
+			//建立一个临时空间
+			ioctl(videodev.fd, VIDIOC_DQBUF, &buf)//从Camera设备的输出队列中取出一有数据的缓存
+			->Camera::updateTexture();//更新显示内容结构,即是更新画面
+			//(更新前的if (frame_count++ % frame_devisor == 0)内容是用frame_count统计帧数,并加入了计数器溢出处理)
+			//updateTexture最终以发出一个imagechanged()信号结束,
+			//至此camera线程结束一次循环,下次从while(1)重复继续
+			//imagechanged()信号会激发CameraPlayer主线程发生中断执行对应的槽函数CameraPlayer::textureChanged()
+		一,Camera::initCapture()
+			根据CAPTURE_DEVICE路径打开摄像头,并返回文件描述符到videodev.fd
+			提取摄像头工作状态信息struct v4l2_capability cap;ioctl(fd, VIDIOC_QUERYCAP, &cap)), 
+			显示:card = Integrated Camera  driver = uvcvideo  bus = usb-0000:00:1a.0-1.6
+			if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)判断能否开始抓取图像工作,
+			if (cap.capabilities & V4L2_CAP_STREAMING)判断能否开始传输数据流工作
+			->PCCamera::subInitCapture()
+				(这个是虚拟函数,意味着PcCamera继承Camera类后可以重新定义函数内容,这里进一步设置摄像头内容)
+			分配memory(5帧640X480yuv格式图片大小的缓存):
+				初始化一条分配请求信息struct v4l2_requestbuffers reqbuf; reqbuf.count = 5; 
+					reqbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; reqbuf.memory = V4L2_MEMORY_MMAP;
+				申请ioctl(fd, VIDIOC_REQBUFS, &reqbuf) 这里只是成功分配了缓存
+				传递参数videodev.numbuffer = reqbuf.count;
+			把分配了的缓存空间的地址及信息取出并初始化空间,
+				已知分配了5个640X480yuv格式图片大小的缓存:
+				获取第 1 个缓存的地址及相关信息并初始化缓存空间:
+					struct v4l2_buffer buf; memset(&buf, 0, sizeof(buf)); 
+					//建立一个临时空间,用于暂存一个缓存的地址及相关信息
+					buf.type = reqbuf.type; buf.index = 0; buf.memory = reqbuf.memory;
+					//先指明要获取哪个那种类已建立的的缓存
+					ioctl(fd, VIDIOC_QUERYBUF, &buf) //获取相关内容并存储在临时空间	
+					videodev.buff_info[i].length = buf.length; videodev.buff_info[i].index = i;
+        				videodev.buff_info[i].start =
+						(uchar *)mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
+					//传递获取的缓存信息,缓存长度,序号,和开始地址,并把打开的摄像头文件指定地方映射到缓存上来
+					memset((void *) videodev.buff_info[i].start, 0x80,videodev.buff_info[i].length);
+					//初始化缓存空间
+					ioctl(fd, VIDIOC_QBUF, &buf);
+					//把缓存加入camera设备的输入队列,即向camera设备表明这个Buffer可以存放东西
+				同理获取第 2,3,4,5 个缓存的地址及相关信息并初始化缓存空间 
+		二,PCCamera::subInitCapture()的内容:
+			struct v4l2_dbg_chip_info chip;ioctl(fd, VIDIOC_DBG_G_CHIP_INFO, &chip))提取摄像头芯片信息
+			提取摄像头帧格式信息:
+				struct v4l2_fmtdesc ffmt;  memset(&ffmt, 0, sizeof(ffmt));
+				ffmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				ffmt.index = 0;ioctl(fd, VIDIOC_ENUM_FMT, &ffmt); qDebug()显示得到芯片支持帧格式YUYV 4:2:2
+				ffmt.index = 1;ioctl(fd, VIDIOC_ENUM_FMT, &ffmt); qDebug()显示得到芯片支持帧格式Motion-JPEG
+				ffmt.index = 1;ioctl(fd, VIDIOC_ENUM_FMT, &ffmt);失败,即表示芯片除上述格式外其他格式不再不支持,
+			获取支持的像素信息:
+				struct v4l2_frmsizeenum fsize;  memset(&fsize, 0, sizeof(fsize));
+				fsize.pixel_format = V4L2_PIX_FMT_YUYV;指定帧格式YUYV 4:2:2
+				fsize.index = 0;ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &fsize);qDebug()显示指定帧格式支持像素 640 480
+				fsize.index = 1;ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &fsize);qDebug()显示指定帧格式支持像素 640 360
+				重复继续列出指定帧格式支持的像素格式有:(352 288) (320,240) (800 448) (960 544) (1280 720) (424 240)
+			获取输入信息:
+				->Camera::vidioc_enuminput(int fd)
+					struct v4l2_input input; memset(&input, 0, sizeof(input));
+					input.index = 0;ioctl(fd, VIDIOC_ENUMINPUT, &input);
+					qDebug()显示相关信息:input name = Camera 1  type = 2  status = 0  std = 0
+			没什么有的操作:
+				int index; ioctl(fd, VIDIOC_G_INPUT, &index)) < 0 qDebug()显示获取的一个目录??并不知道有什么用
+                        获取当前设置;
+				struct v4l2_format fmt; memset(&fmt, 0, sizeof(fmt));
+				fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; ioctl(fd, VIDIOC_G_FMT, &fmt);
+				显示fmt width = 1280  height = 720  pfmt = 1448695129(即对应YUYV 4:2:2)
+                        更改设置:
+				fmt.fmt.pix.width = 640; fmt.fmt.pix.height = 480; fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+				(相当于width = 640  height = 480  pfmt = 1448695129)
+				ioctl(fd, VIDIOC_S_FMT, &fmt);
+			重新获取当前设置检查
+			传递参数:videodev.cap_width = fmt.fmt.pix.width; 
+				 videodev.cap_height = fmt.fmt.pix.height;
+		 三,Camera::updateTexture((uchar *)videodev.buff_info[buf.index].start, videodev.cap_width, videodev.cap_height);
+			当 m_running == 0 时,不进行更新具体事情,直接返回,//注意,m_running只控制窗口不更新,摄像头依然进行抓取工作
+			否则->PCCamera::textureProcess(data, width, height);
+				->m_image->yuyv2rgb(data, width, height); 
+				//更新m_image的后一张图片内容,即更新两者其一的m_image->data[x]内容,这里涉及复杂的指针队列内容传递,后详述!!
+			->m_image->swapImage();
+				mutex.lock();        //上互斥锁
+				front_index = (front_index + 1) % 2;//交换前后图片顺序,
+				updated = 4;         //???
+				mutex.unlock();      //解锁
+			发出信号:emit imageChanged();
+
+	6,主线程接收了imageChanged()信号后://主线程,另外textrue翻译为纹理!!
+	  ->CameraPlayer::textureChanged()
+		mTextureChanged = true;
+		update();  //由于继承QQuickItem,setFlag(ItemHasContents, true),所以跳到被继承的updatePaintNode()
+160701	  ->CameraPlayer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)//由第三个Qt软件系统自创建的线程执行
+	  //关于updatePaintNode()与setFlag(ItemHasContents, true)问题,在下述!!
+	  第一次updatePaintNode();
+		node = mCamera->createNode();
+			新建texture: m_texture = new CameraTexture(m_image->getWidth(), m_image->getHeight());
+				mWidth = 640, 
+				mHeight = 480,	
+				glGenTextures(1, &mTexture);//生成含1个纹理的纹理组,并把第纹理的索引内容放到指针&mTexture指向的区域
+				glBindTexture(GL_TEXTURE_2D, mTexture);//给纹理组mTexture绑定一个GL_TEXTURE_2D目标类型标记
+				//注意,当一个目标类型标记例如GL_TEXTURE_2D,绑到了一个纹理组时,它便不能绑定到其他纹理组去,直到解绑
+    				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				//给绑有指定目标GL_TEXTURE_2D的纹理组,添加设置内容:是从s方向开始,遇到边界为止
+    				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				//给绑有指定目标GL_TEXTURE_2D的纹理组,添加设置内容:指定目标GL_TEXTURE_2D在贴图时,是从t向开始,遇到边界为止
+    				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				//给绑有指定目标GL_TEXTURE_2D的纹理组,添加设置内容:
+				//如果纹理贴图数据分辨率大于指定分辨率时,会自动线性缩小纹理贴图数据分辨率
+    				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				//给绑有指定目标GL_TEXTURE_2D的纹理组,添加设置内容:
+				//如果纹理贴图数据分辨率小于指定分辨率时,会自动线性模糊放大纹理贴图数据分辨率
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 640, 480, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+				//把一张原始图片数据,及其色彩编码方式,和原始分辨率尺寸的信息输入到绑定了GL_TEXTURE_2D的纹理组
+				//然而这次并没有原始图片,原始图片的指针处为0;
+				//只是给纹理组添加图片内容,并没有实际的贴图或者显示图片的操作,而且贴图到哪里也未知
+				//到这里,窗口rectangle里面依然没有内容显示
+				glBindTexture(GL_TEXTURE_2D, 0);//解绑定,
+				m_texture = 这个构造好的CameraTexture类对象的指针 //CameraTexture类继承QSGTexture
+				//这里相当于把设置好的opengl纹理贴图实现封装到上一层QSGTexture里供其他函数调用				
+			m_node = new QSGGeometryNode;//注意QSGGeometryNode *m_node;而new QSGGeometryNode返回的是指向QSGGeometryNode的指针
+			//这里初始化camera类对象构造时建立的一个内容节点,而这内容节点是几何图形节点.
+			geometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 4);
+			//初始化一个几何显示内容,这个内容是使用到opengl纹理技术的2d几何图形,有四个顶点
+			geometry->setDrawingMode(GL_TRIANGLE_STRIP);//设置这个几何图形为顶点间连线闭合的四边形
+			m_node->setGeometry(geometry);//把这个几何内容加入内容节点,
+			m_node->setFlag(QSGNode::OwnsGeometry);
+			//设置了附属的性质,即表示时,如果内容节点m_node删除时,其指向的几何内容geometry也同时删除,
+			//至此虽然设置好几何内容,以及与内容节点的联系,但是还没有输入几何参数,还没有执行画出的操作,
+			//所以,窗口rectangle里面还没有内容显示.
+			YUV2RGBMaterial *material = new YUV2RGBMaterial;//初始化一个材质,这材质继承类QSGMaterial
+			material->setTexture(m_texture);//把CameraTexture类对象加入到材质里去,
+			m_node->setMaterial(material);//把材质加入到内容节点,
+			//至此才建立了opengl纹理贴图与被贴图对象的几何内容的关联,
+			//即以后glTexImage2D输入的图片将按设置贴向这个geometry四边形对象里
+			//glTexImage2D只是添加了要贴图的图片数据到纹理库而已
+			//可以发现纹理组mTexture封装到QSGTexture里,再封装到QSGMaterial来供对应node应用
+			//通过多重的类对象封装才建立起贴图的纹理库和被贴图对象geometry的关系绑定
+			m_node->setFlag(QSGNode::OwnsMaterial);
+			//设置了附属的性质,即表示时,如果内容节点m_node删除时,其指向的材质material,(包括里面的CameraTexture类对象)也同时删除,
+			return m_node;//把这个构建好的内容节点的指针传递
+		由于mBoundChanged在初始化构造Cameraplayer类对象是为true,
+		所以执行mCamera->updateGeometry(x(), y(), width(), height());
+		//x(), y(), width(), height(),即提取这个Cameraplayer类对象的x,y,width,height内容并传递到updateGeometry函数.
+		 	->QSGGeometry::TexturedPoint2D *vertices = m_node->geometry()->vertexDataAsTexturedPoint2D();
+			//提取几何内容geometry的几何参数的地址
+			vertices[0].x = x;.......//第一次输入几何参数,只有输入了几何参数才能利于后面执行有效的画出的操作,
+			//如果创建了几何内容对象,而一直不执行输入几何参数的操作,则不能执行有效的画出操作,这样opengl的贴图工作也一直虚贴
+			//如果输入了几何参数,参数会保存起来,以后每次画出操作都按参数执行,如果后来有参数改变了,画出操作按最新的参数执行
+		mBoundChanged = false;//关标记,
+		node->markDirty(QSGNode::DirtyGeometry);//关键一步,通知sence graph渲染系统,根据内容节点node内容执行画面操作
+		渲染系统执行时的工作有:
+			检测到是几何内容节点,根据几何内容的设置和几何参数执行画出操作,
+			检测到几何内容绑定了opengl的纹理贴图,把贴图内容按设置贴到几何内容上去,
+			完成以上渲染工作后生成具体显示的帧内容,并显示到窗口上去.
+		这时,窗口rectangle里面才开始有了内容显示,这里特别注意,显示出来的内容尺寸不就是Cameraplayer类的x,y,width,height内容
+		毕竟那些都只不过是设置参数,用户可以自定义显示内容的具体形态,
+		//也就Cameraplayer类的对象是一个可显示对象,但对象最终显示的真实形态并不一定就是符合x,y,width,height参数的子窗口内容
+		后面如果mTextureChanged检测到true,执行mCamera->updateMaterial();//就只是更新纹理的贴图的图片数据内容
+			 m_texture->updateFrame(m_image->getFrontImage());
+				glBindTexture(GL_TEXTURE_2D, mTexture);//给纹理组mTexture绑定一个GL_TEXTURE_2D目标类型标记
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, GL_RGB, GL_UNSIGNED_BYTE, data);
+				//把一张原始图片数据,及其色彩编码方式,和原始分辨率尺寸的信息输入到绑定了GL_TEXTURE_2D的纹理组
+				//原始图片数据的指针是data,即m_image->getFrontImage()传来的参数	
+				glBindTexture(GL_TEXTURE_2D, 0);//解绑定
+		mTextureChanged = false;//关标记
+		node->markDirty(QSGNode::DirtyGeometry);//通知sence graph渲染系统,根据内容节点node内容执行画面操作
+		//即重复一次,据几何内容执行画出操作,据纹理组内容给几何内容贴图操作,渲染生成显示帧,显示到窗口,
+		最后,return node;//内容节点会返回给qt系统架构,
+		//作为下一次的updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)里的oldnode参数内容
+	第n次updatePaintNode(),n不等于1;
+		node = static_cast<QSGGeometryNode *>(oldNode);//提取上次updatePaintNode()返回的内容节点,
+		如果mBoundChanged标记为true->mCamera->updateGeometry(x(), y(), width(), height());
+		mBoundChanged = false;
+		node->markDirty(QSGNode::DirtyGeometry);
+		如果mTextureChanged检测到true,执行mCamera->updateMaterial();	
+		mTextureChanged = false;
+		node->markDirty(QSGNode::DirtyGeometry);
+		最后,return node;//返回这次updatePaintNode()内容节点给qt系统架构,
+			
+160629	7,处理学习了QT属性内容:
+		1,声明:(CameraPlayer类声明里声明了一个player属性)
+			Q_OBJECT
+   			Q_PROPERTY(bool player READ play WRITE setPlay NOTIFY playChanged)
+		2,然后把CameraPlayer封入资料库后,qml文件直接使用属性例:
+				CameraPlayer {
+						id: camera
+      						width: 350
+        					height: 240
+        					player:true     //引入的属性player
+					     }
+	
+	8,软件主线程的运作从CameraPlayer的player属性开始:
+		因为qml里Cameraplayer属性player:true,->CameraPlayer::setPlay 
+			-> mCamera->startStream()
+				Camera::m_running = true;
+				Camera::m_wait.wakeAll();
+			-> mPlay = true -> emit playChanged(true)(但playChanged并没有绑定指定槽,所以没有作用)
+
+160629	9,不起作用内容:
+		qml里:
+			Timer(时间触发器对象),
+			NumberAnimation(帧动画对象)
+		class Cameraplayer里:
+			signals:void playChanged1(bool);
+		PCCamera::subInitCapture()里;
+			ioctl(fd, VIDIOC_G_INPUT, &index) 获取一个目录???
+	10,关于库文件问题:
+		大量使用到v4l2内容却不知道哪里添加进来的库.
+
+	11,复杂的指针问题:
+		m_image->data[x]
+		glGenTextures(1, &mTexture),CameraTexture::GLuint mTexture;
+	
+	
+160701	12,sence graph渲染层问题:
+		1,setFlag(ItemHasContents, true)后,QQuickItem::update()才可以转到用户重写的QQuickItem::updatePaintNode()函数
+	  	否则,QQuickItem::update()并没有任何作用;	  
+	  	2,用户重写的CameraPlayer::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)在Qt软件系统另外自创建的线程执行
+	  	  注意这里参数QSGNode *oldNode, UpdatePaintNodeData *,一般并非用户传递,而是Qt软件系统自建自传递即:而不是用户类里建立的数据项,
+		  例如CameraPlayer,camera_texture用户类里除了重写了的CameraPlayer::updatePaintNode()函数项外,
+	  	  并没有其他关于QSGNode *, 和UpdatePaintNodeData *类的数据声明创建
+			setFlag(ItemHasContents, true)后,系统自建了一个QSGNode * A,和一个UpdatePaintNodeData * B数据,其值为null!!
+			第一次update()后,系统把自建的这两个数据作为参数导入并第一次执行updatePaintNode(),
+			执行后,return的QSGNode *型数据覆盖原来的A,
+			下一次updatePaintNode()时,导入更改了的A,更改了的B,重复曾经操作....
+	   	  另外camera类有个QSGGeometryNode *m_node;QSGGeometryNode继承QSGNode,但是,这个m_node不是传递给updatePaintNode()的参数
+		3,QSGGeometry测试1;CameraPlayer构造时mBoundChanged(true)改为false,理论上不会执行updatePaintNode的updateGeometry
+
+
+	13,其他测试问题:
+		如果qml里同时建立两个窗口访问同一个camera设备时是不可能的??,推断是建立缓存处出问题.
+
+		//而camerplayer对象的x,y,width,height改变时却是执行camera类的函数的??从程序运行看发现mBoundChanged一直标记
+
+/********************************************************************/
+
+/home/kingders/c/Qt_serialport_demo2_success/QtCreator_SerialPortComunicationForLinux-master 调试
+
+160705	1,第一阶段:ui架构,main函数始,先初始化qt系统环境,建立MainWindow类对象w, //主线程
+	
+	2,MainWindow类对象w构造://主线程
+		由于没有传递parent指针值,所以默认parent=0,传递给QWidget构造函数,意味w是一个独立的主窗口对象
+		isEnterSend = true,
+		isAutoEnter = true,
+		historyIterator(inputHistory.end()),//end()       ??
+		ui = new Ui::MainWindow //这里是建立了一个在UI命名空间里建立的MainWindow类的对象,并把指针递给ui,这里
+		//注意在UI命名空间里声明的MainWindow类与不在UI命名空间里声明的MainWindow类,是两个不一样的类
+		//注意ui这个对象项,在MainWindow类的声明是这样 Ui::MainWindow *ui,
+		//即ui是一个指向 在UI命名空间里建立的MainWindow类的对象 的指针
+		//这里ui指针的成功初始化,相当于Qt根据mainwindow.ui初始化了一个Ui界面Ui_MainWindow类对象.
+			特别地,由于mainwindow.ui绑定了一些InputPlainTextEdit类,所以Ui_MainWindow类里含有InputPlainTextEdit类对象内容
+			所以要建立建立InputPlainTextEdit类对象inputPlainTextEdit
+			UI类的槽函数绑定操作
+		ui->setupUi(this);//据ui指向的Ui界面内容,着手初始化界面显示
+		serialPortThread = new SerialPortThread();//初始化一个串口线程
+	
+160706	3,InputPlainTextEdit类对象inputPlainTextEdit构造.//主线程,这时主线程初始化ui类对象的工作之一
+	  //QWidget *centralWidget; centralWidget = new QWidget(MainWindow);InputPlainTextEdit(centralWidget)
+	  //InputPlainTextEdit继承QPlainTextEdit类,QPlainTextEdit类是ui类,就是说InputPlainTextEdit也是ui类
+	  //InputPlainTextEdit重载了QPlainTextEdit类的一些功能,
+	  //使用:在mainwindow.ui里修改,先拖出一个QPlainTextEdit类对象的框架,
+	  //->右键->提升为->选InputPlainTextEdit->成功变为InputPlainTextEdit类对象
+		QPlainTextEdit(centralwidget)//InputPlainTextEdit继承QPlainTextEdit,而参数centralWidget传递给QPlainTextEdit构造
+		isEnterSend = true,
+
+	4,UI类的槽函数绑定操作,分为两部分://主线程,这时主线程初始化ui类对象的工作之一
+		默认绑定://即不用程序员调优connect()函数,而实现的绑定
+			例如
+			mainwindow.ui拖入一个QMainWindow窗口类对象MainWindow
+			MainWindow里拖入了一个QPushButton类按钮对象,命名为clearShowButton,
+			即建立了一个QPushButton类对象clearShowButton
+			mainwindow.ui自形成一个UI_mainwindow.h	
+			如果MainWindow类头文件.h#include "ui_mwindow.h",构建对象w时UI项设为UI::MainWindow,
+			那么对象w便含有 一个符合mainwindow.ui标准的 对象ui,而这个对象ui里又含有一个 对象clearShowButton
+			且MainWindow类里有一项槽函数的声明的名字为这样子的on_clearShowButton_clicked();
+			那么 w里的ui里的clearShowButton  的clicked()信号, 会默认绑到 w的  on_clearShowButton_clicked()槽函数
+			同理,发现以下的默认绑定:
+			w里的ui里的clearInputButton      的clicked()信号, 会默认绑到 w的  on_clearInputButton_clicked()槽函数
+			w里的ui里的autoEnterCheckBox     的clicked()信号, 会默认绑到 w的  on_autoEnterCheckBox_clicked()槽函数
+			w里的ui里的enterSendCheckBox     的clicked()信号, 会默认绑到 w的  on_enterSendCheckBox_clicked()槽函数
+			w里的ui里的sendMessageButton     的clicked()信号, 会默认绑到 w的  on_sendMessageButton_clicked()槽函数
+			w里的ui里的onOffSerialPortButton 的clicked()信号, 会默认绑到 w的  on_onOffSerialPortButton_clicked()槽函数
+		自定义绑定,//这个程序没有使用这种绑定,以下是假定使用了,会发生的事情
+			mainwindow.ui设计时,编辑->Edit signal/slot->进入信号与槽函数绑定设计模式,
+			点击一界面类A,拖到界面类B ->出现选框
+			选择A类一信号,选择B类一槽函数 ->确定
+			相当于建立了一connect()操作,
+			最MainWindow w;构建对象w时,会自动执行上述的connect()操作,
+	
+	5,SerialPortThread类对象构造//主线程,构造依然是主线程实行
+	  //注意SerialPortThread继承Qthead类,意味着这对象会建立一个子线程并执行,
+	  //注意,子线程不仅仅只访问建立这线程的子类的内容,还可以访问其他类的内容	????
+		isEnd = false,//判断子线程是否结束
+		serialPortNumber = "/dev/ttyS0",//serialPortNumber是一串字符串
+		baudRate = 9600,
+		QSerialPort::Parity parity = QSerialPort::NoParity,//即=0,即无奇偶
+		//这里涉及到c++语法内容,Parity是QSerialPort类里的一个枚举数据项,这里并没有建立QSerialPort类对象,
+		//却是直接建立了一个 QSerialPort类蕴含的枚举数据Parity项 的数据parity
+		//这个数据parity是SerialPortThread类蕴含的内容,
+		//而现在SerialPortThread类对象构造时,赋予了这个数据parity的值是 QSerialPort类蕴含的枚举数据Parity项中的 NoParity项
+		//赋予了这个数据parity的值即是 QSerialPort::NoParity, 即0!!
+		//方便阅读,列出复杂关系图!!
+		//	class SerialPortThread:public QThread
+		//	{
+		//		int A;
+		//		QSerialPort::Parity parity;
+		//		....
+		//	}
+		//	class Q_SERIALPORT_EXPORT QSerialPort : public QIODevice
+		//	{
+		//		enum Parity {
+		//	        NoParity = 0,
+		//	        EvenParity = 2,
+		//	        OddParity = 3,
+		//	        SpaceParity = 4,
+		//	        MarkParity = 5,
+		//	        UnknownParity = -1
+		//		};
+		//		....
+		//	)
+		//	SerialPortThread()
+		//	{
+		//		parity = QSerialPort::NoParity;//即 = 0
+		//		....
+		//	} 
+		QSerialPort::DataBits dataBits = QSerialPort::Data8,//即=8,8位传输,
+    		QSerialPort::StopBits stopBits = QSerialPort::OneStop,//即=1,一位停止位,
+
+	6,第二阶段,执行 w.init()//还是主线程
+		serialPortThread的信号serialPortOpenStatus(int) 绑定到 w的槽函数serialPortOpenStatus(int)
+		//注意名字相同,但完全是两个不同的东西,另外,信号里的参数int也会传递到槽函数的int
+		//另外,应该在子线程执行w的槽函数serialPortOpenStatus(int) 子线程可以访问的数据 与 数据所属的类是不是子线程的类 无关.   
+		serialPortThread的信号serialPortReceivedData(QByteArray) 绑定到 w的槽函数serialPortReceivedData(QByteArray)
+		//信号里的参数QByteArray也会传递到槽函数的QByteArray
+		ui->inputPlainTextEdit的信号sendMessage() 绑定到 w的槽函数sendMessage()
+		ui->inputPlainTextEdit的信号arrowMessage(int) 绑定到 w的槽函数arrowMessage(int)
+		//信号里的参数int也会传递到槽函数的int
+	7,最好阶段,w.show(); return a.exec();//显示w,然后进入软件循环,即追终成功启动了软件
+	  //整个初始化和启动到最后步入然后步入软件循环,等待用户操作的过程都只有主线程在工作
+
+	8,软件正常启动后,修改点击串口设置,都只会触发qt自带的槽函数修改容,并没有触发任何程序员定义的槽函数
+
+	9,软件正常启动后onOffSerialPortButton点击后
+	  ->on_onOffSerialPortButton_clicked()//主线程
+	  //onOffSerialPortButton是个异或操作,发现串口子线程在运行,便传递参数通知其停止,没发现串口子线程在运行,便初始化打开串口子线程
+		->serialPortThread->isRunning().//检查串口子线程是否在执行,w里有一项串口子线程对象serialPortThread
+		//isRunning()是Qthead的函数,并不是重写后的函数
+			>serialPortThread->setIsEnd(true);//如果串口子线程已在运行，设置串口线程是否停止标志位为true,告诉串口线程要关闭
+			否则初始化并打开串口线程,内容包括:
+				据ui的PortLineEdit类对象serialPortLineEdit设置串口号
+				根据ui的串口设置的一些combobox内容来设置对象serialPortThread的波特率, 校验位,停止位,数据位,
+				serialPortThread->setIsEnd(false);//设置串口线程是否停止标志位为false,告诉串口线程可以继续工作
+				开启串口子线程,serialPortThread->start();
+
+	10,开启子线程后:
+	  ->serialPortThread::run()//子线程
+		把serialPortThread串口配置内容传递到 QSerialPort类对象serialPort对应的内容, //QSerialPort是Qt官方类
+		serialPort->open(QIODevice::ReadWrite); //据配置打开串口
+			如果打开失败,
+				isEnd = true;//设置串口线程是否停止标志位为true,这里纯标记,在告诉串口线程要关闭前串口线程会先关闭
+				emit serialPortOpenStatus(-1);// 发送状态信号,由主线程接收并执行槽函数
+				delete serialPort;//清理资源
+				return;//退出run()函数,也意味着关闭串口子线程		
+			否则,
+				isEnd = false;//设置串口线程是否停止标志位为false,告诉串口线程可以继续工作
+        			emit serialPortOpenStatus(1);// 发送状态信号,由主线程接收并执行槽函数
+		while(!isEnd)//根据isend的告诉,判断是否循环,true告诉不循环了,意味run()将结束,串口线程将结束
+		//false告诉继续循环,意味run()还在继续,串口线程不结束
+		而while循环的内容是:
+			serialPort->waitForReadyRead(50);//每次等50微秒,用于读取方面
+				如果waitForReadyRead(50)返回值大于零,即表示等来新内容
+				receivedData = serialPort->readAll();//把新内容全部放入一个Qt官方建立的字符数组类里QByteArray
+				std::cout<<"receive data:"<<receivedData.toStdString()<<std::endl;//在另外独立的Qt调试系统显示消息
+				emit serialPortReceivedData(receivedData);//发出已接受信号,由主线程接收并执行槽函数
+			给远程串口发内容:			
+				如果sendFlag为true,才去处理内容和发送
+				serialPort->write(sendData)//给串口的写缓存区写入内容,sendData是QByteArray类对象
+				sendFlag = false;//清除标记
+					如果有回应内容则全部读出,
+					//通过while(serialPort->waitForReadyRead(100))来检测是否还有回应内容接受
+					//即当某次100微秒终于没送到消息时,认为已接收完全部回应信息
+		如果之前isend为true,那么会逃过循环来到这,在处理些事后结run(),结束串口子线程.其中有
+    			if(serialPort->isOpen()) serialPort->close();//如果串口serialPort打开了,那么关闭它
+			emit serialPortOpenStatus(0);//发送状态信号,由主线程接收并执行槽函数
+			delete serialPort;//删除serialPort对象
+
+	11,子线程发出serialPortOpenStatus()信号后
+	   主线程执行槽函数serialPortOpenStatus()
+		传递来参数-1表示打开串口失败,
+			这时窗口上的串口配置的对象标置为活动的,即对应对象可以被修改,被操作
+			QMessageBox::warning(NULL, QStringLiteral("错误"), 
+					QStringLiteral("串口号不存在或者被其他程序占用!"), 
+					QMessageBox::Ok, QMessageBox::Ok);
+			//建立一个消息框QMessageBox类临时对象,并执行warning函数
+			//于是屏幕会出现一个独立的消息框,
+		传递来参数0表示正常关闭了串口,
+			这时窗口上的串口配置的对象标置为活动的,即对应对象可以被修改,被操作
+		传递来参数0表示成功打开了串口,	
+			这时窗口上的串口配置的对象标置为不活动的,即对应对象不可以被修改,被操作
+
+	12,子线程发出serialPortReceivedData()信号
+	   主线程执行槽函数serialPortReceivedData()
+		showString.append(receivedData);//提取QByteArray类对象内容 添加到现有Qstring类对象的内容的后面
+    		ui->textBrowser->clear();//清除ui文本显示器
+    		ui->textBrowser->append(showString);//显示到文本显示器
+
+	13,软件正常启动后on_enterSendCheckBox_clicked点击后
+	   ->on_enterSendCheckBox_clicked()//主线程
+		w.isEnterSend = ui->enterSendCheckBox->isChecked();//把checkbox类对象enterSendCheckBox当前设置导入
+		ui->inputPlainTextEdit->setIsEnterSend(isEnterSend);//据设置设置PlainTextEdit里的配置.
+			inputPlainTextEdit.isEnterSend = w.isEnterSend
+			//其实就是给对象inputPlainTextEdit设一标记,提示按下换行符时,可以发信息
+
+	14,软件正常启动后on_autoEnterCheckBox_clicked点击后
+	   ->on_autoEnterCheckBox_clicked()//主线程
+		w.isAutoEnter = ui->autoEnterCheckBox->isChecked();//把checkbox类对象enterSendCheckBox当前设置导入
+		//其实就是给对象w设一标记,提示发送信息时,自动给信息加一换行符
+
+	15,软件正常启动后on_clearInputButton_clicked点击后
+	   ->on_clearInputButton_clicked()//主线程
+		ui->inputPlainTextEdit->clear();//清除ui文本显示器
+
+	15,软件正常启动后on_clearShowButton_clicked点击后
+	   ->on_clearShowButton_clicked()//主线程
+		ui->inputPlainTextEdit->clear();//清除ui输入文本显示器内容
+			ui->textBrowser->clear();//清除ui文本显示器
+    			showString.clear();//清空Qstring类对象的内容
+	
+	16,软件正常启动后on_sendMessageButton_clicked点击后
+	   ->on_sendMessageButton_clicked()//主线程
+		if(!serialPortThread->isRunning())return;//如果串口线程没有运行，不发送数据
+		QString sendStr = ui->inputPlainTextEdit->toPlainText();//提取内容到发送缓存,
+		inputHistory.push_back(sendStr.trimmed());
+    		historyIterator = inputHistory.end();
+		//把内容也拷贝一份到历史记录里,更行历史指针.
+		ui->inputPlainTextEdit->clear();//清除ui输入文本显示器内容
+		if(isAutoEnter)sendStr += "\n";//如果自动换行标记了,就给缓存的字符串内容后加入换行符
+		serialPortThread->setSendData(sendStr.toUtf8());//把数据写入QByteArray()类,利于Qt串口函数发送.
+		serialPortThread->setSendFlag(true);//开标志,串口线程检测到时,就执行发送操作
+
+	17,软件正常启动后,在输入框里每次敲键盘都会触发keyPressEvent()//主线程
+		QPlainTextEdit::keyPressEvent(event);//输入框回显输入的键盘字符
+		int key = event->key();//提取输入的键盘字符的值
+		如果是向上方向键,就发信号emit arrowMessage(1);提示获取更前一条输入的历史信息,并置换到信息输入框inputPlainTextEdit里
+		如果是向下方向键,就发信号emit arrowMessage(0);提示获取更后一条输入的历史信息,并置换到信息输入框inputPlainTextEdit里
+		如果按下的是换行符,如果,标记了换行符可发送消息,则emit sendMessage();//发信号,跳到槽函数sendMessage()
+		//sendMessage()内容与on_sendMessageButton_clicked()一毛一样,
+
+	18,最后关于历史信息的问题
+	   当发出arrowMessage()信号后,执行void MainWindow::arrowMessage(int arrow);
+		if(inputHistory.isEmpty()) return;//没有历史信息则不操作
+		否则调整历史记录的指针,
+		最后把指定历史记录的指针 指向的内容 回显到输入框inputPlainTextEdit里	
+
+/********************************************************************/
+
+/home/kingders/c/Qt_quadcopter_success 调试
+
+160709	1,简括:
+		main开始->软件环境对象a构造->
+		对象w构造:
+			ui:MainWindow
+			各大窗口类对象的初始化//初始化,不代表显示出来,当点击了xx按钮,触发on_xx_clicked()才显示窗口
+				m_dialogControl(this),//控制
+				m_dialogParameter(this),//参数
+				m_dialogCalibration(this),//校正
+				m_dialogScene(this),//场景
+				m_dialogDataSource(this),//数据源
+				m_dialogStatus(this),//状态
+				m_dialogBootloader(this)//更性程序
+			通过网络获取版本信息//重点1:Qnetworkrequest,Qnetworkreply使用
+			给软件标题处加创建时间
+			获取数据源类对象m_dialogDataSource里的 串口数据指针,和文件数据指针,目的是让其他类对象也能访问这些数据
+			//把取得的指针放到binaryParser textFileParser
+			//重点2:这里实际上是传递了引用,而不是指针,引用与指针概念混淆要分清
+			绑定信号与槽:
+			//关于文本数据处理
+    			textFileParser.displayTranslation(float,float,float),m_dialogScene.displayPosition(float,float,float)
+			//串口数据 与 场景 处理
+			binaryParser.displayAttitudeQuaternion(Quaternion),  m_dialogScene.displayAttitude(Quaternion)
+			binaryParser.displayTranslation(float,float,float),  m_dialogScene.displayPosition(float,float,float)
+			m_dialogScene.getAttitude(),                         binaryParser.cmd_getAttitudeQuaternion()
+			m_dialogScene.getPosition(),                         binaryParser.cmd_getTranslation()
+			//串口数据 与 控制面板 处理
+			m_dialogControl.setMode(uint8_t),                    binaryParser.control_setMode(uint8_t)
+			m_dialogControl.sendHeartbeat(),		     binaryParser,SLOT(control_sendHeartbeat()
+			m_dialogControl.lockThrottle_setThrottle(QVector<float>), 
+								binaryParser.control_lockThrottle_setThrottle(QVector<float>)
+			m_dialogControl.lockAttitude(QByteArray),            binaryParser.control_lockAttitude(QByteArray)
+			binaryParser.onControlLockAttitude(QByteArray),      m_dialogControl,SLOT(onLockAttitude(QByteArray);
+			//串口数据 与 参数 处理
+			m_dialogParameter.parameter(QByteArray),             binaryParser.cmd_parameter(QByteArray)
+			binaryParser.onParameter(QByteArray),		     m_dialogParameter.onParameter(QByteArray)
+			//串口数据 与 校正 处理 
+			binaryParser.(onReturnVector(uint8_t,float,float,float),
+            							m_dialogCalibration.onGetXyz(uint8_t,float,float,float)))
+			m_dialogCalibration.getXyz(uint8_t),   		     binaryParser.cmd_getVector(uint8_t)
+			//串口数据 与 状态 处理
+			binaryParser.onReturnStatus(uint8_t,QVector<uint8_t>),
+								m_dialogStatus.onReturnStatus(uint8_t,QVector<uint8_t>)
+			m_dialogStatus.getStatus(QVector<uint8_t>),          binaryParser.cmd_getStatus(QVector<uint8_t>)
+			//串口数据 与 更新程序 处理
+			m_dialogBootloader.cmd(uint8_t,QByteArray),          binaryParser.cmd_bootloadCmd(uint8_t,QByteArray)
+			binaryParser.onBootloaderStatus(uint8_t,QByteArray), m_dialogBootloader.onStatus(uint8_t,QByteArray)
+			//参数 与 校正 处理
+			m_dialogCalibration.makeGyrOffset(QVector<float>),   m_dialogParameter.onMakeGyrOffset(QVector<float>)
+			m_dialogCalibration.makeAccParam(QVector<float>),    m_dialogParameter.onMakeAccParam(QVector<float>)
+			m_dialogCalibration.makeMagParam(QVector<float>),    m_dialogParameter.onMakeMagParam(QVector<float>)
+			//控制 与 参数 处理
+			m_dialogControl.makeHorizontalAttitude(Quaternion)), m_dialogParameter.onMakeHorizontalAttitude(Quaternion)
+			//串口数据 与 命令处理类对象 处理
+			m_cmdParser,SIGNAL(sendPacket(QByteArray),           binaryParser.sendPacket(QByteArray)
+			//串口数据 与 主对话框 处理 
+			binaryParser.onReturnMessage(QString),               w.onReturnMessage(QString)
+		各大窗口对象构造
+			m_dialogControl(this),//控制
+				Ui::DialogControl
+   				m_currentMode(HALT),
+    				m_baseThrottle(0),
+   				m_dialogCameraControl(this),
+    				m_lockAttitudeCanSend(true),
+    				m_lockAttitudeNeedSend(false)
+				loadSettings();
+    				m_lockAttitudeTimer.setInterval(30);
+    				m_lockAttitudeTimer.start(100);
+				//功能绑定
+				m_heartbeatTimer.timeout()),                  this,SLOT(onHeartbeatTimer()
+				ui->lockAttitude_widget.controlChanged(),     this,lockAttitude_onControlChanged();
+				m_dialogCameraControl.onControlChanged(),     this.lockAttitude_onControlChanged();
+				m_lockAttitudeTimer.timeout(),                this.onLockAttitudeTimer();
+			m_dialogParameter(this),//参数
+				Ui::DialogParameter
+				setWindowFlags(Qt::Dialog | Qt::WindowMinMaxButtonsHint);//设置窗口最大化/窗口化按钮
+    				ui->wExtend->hide(); //ui的扩张窗设置
+				ui->tableView->setModel(&m_tableViewModel);//选择表格的范本
+				setupAreas();//设置范本的设置
+			m_dialogCalibration(this),//校正 (未分析完)
+				Ui::DialogCalibration
+				setWindowFlags(Qt::Dialog | Qt::WindowMinMaxButtonsHint);//设置窗口最大化/窗口化按钮
+    				setupDataOption();
+				m_sampleCountdown = 0;
+				m_isSampling = false;
+				m_radius = 1;
+				m_dataType = Protocol::VectorType::RAW_ACC;
+				for(int i=0;i<3;i++)
+					m_preOffset[i] = 0;
+					m_xyzDisplay[i] = 0;
+					m_resultOffset_noPre[i] = 0;
+					m_resultScale[i] = 1;	    
+				//功能绑定
+				m_timerAutoGetData.timeout(),                 this.onAutoGetDataTimer();
+			m_dialogScene(this),//场景
+				Ui::DialogScene
+				setWindowFlags(Qt::Dialog | Qt::WindowMinMaxButtonsHint);//设置窗口最大化/窗口化按钮
+				//功能绑定
+				m_timerAutoGetAttitude.timeout(),             this.getAttitude();//姿态更新
+				m_timerAutoGetPosition.timeout(),             this.getPosition();//位置更新
+			m_dialogDataSource(this),//数据源
+				Ui::DialogDataSource
+				m_file_running = false;
+				m_file_pause = false;
+				m_serial = 0;
+				m_serial_opening = false;
+
+				m_serial_timer.setInterval(30);
+				//功能绑定
+				m_serial_timer.timeout(),                     this.every30ms();//串口数据更新
+    				initFileSetting();
+    				initSerialSetting();
+    				connectSignalSlot();
+					//功能绑定
+					m_textFileParser.onStop(),                    this.on_file_stop();
+					m_serialBinaryParser.send(QByteArray)),       this.serial_send(QByteArray);
+			m_dialogStatus(this),//状态
+				Ui::DialogStatus
+				//功能绑定
+				m_timerGet.timeout()),                        this.onTimer();
+			m_dialogBootloader(this)//更性程序
+				Ui::DialogBootloader
+				m_status(Status::INIT)
+				setWindowFlags(Qt::Dialog | Qt::WindowMinMaxButtonsHint);//设置窗口最大化/窗口化按钮
+				QSettings settings;
+				ui->leFilePath->setText(settings.value(SETTING_BOOTLOADER_FILE_PATH,"").toString());//提取路径
+				//初始化进度条显示
+				m_timer.timeout(),this.onTimer();
+				m_timer.setInterval(20);
+	1,场景窗口与opengl:
+		暂时只发现在dialogscene.ui里初始化了基于opengl的三维场景类GLWidget对象scene
+		->scene = new GLWidget(horizontalLayoutWidget);
+    			quadcopter(1),// GlQuadcopter quadcopter;
+    			m_modelAxes(0.5),//GlAxes m_modelAxes;
+    			m_translationTrace(100),//GlTrace m_translationTrace;
+    			m_autoScope(m_glView) //AutoScope m_autoScope;
+    			GlText::setGlwidget(this);//???
+    			m_glView.changeLatitude(-45);
+    			m_glView.changeLongititude(-135);//重置视觉时:onSetView(0,0,0,1);
+							 //m_glView.setLatitude(-45);
+							 //m_glView.setLongititude(-135);
+			m_needUpdate = false;
+    			m_translationTrace.setLineWidth(2);
+    			//场景显示东西的标记
+			m_needDisplayWall = true;  //参考墙
+    			m_needDisplayModel = true; //模型
+    			m_needDisplayModelAxes = false; //模型坐标系
+    			m_needDisplayWorldAxes = false; //世界坐标系
+    			m_angleDegree_yaw = 0;
+    			m_angleDegree_pitch = 0;
+    			m_angleDegree_roll = 0;
+
+    			for(int i=0;i<3;i++)
+        			m_position[i] = 0;
+			//功能绑定
+			m_autoScope.setView(float,float,float,float),            this.onSetView(float,float,float,float);
+}
+
+
+
+
+
+
+
+
+
+
+
+		

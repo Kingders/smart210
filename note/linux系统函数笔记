@@ -1,0 +1,766 @@
+/********************************************************************/	
+index:(Ctrl+f)
+	1,v4l2
+	2,mmap
+	3,opengl
+	4,指针问题
+	5,奇怪语法问题
+	6,linux驱动头文件位置的说明 
+		6.1,linux/init.h
+		6.2,linux/module.h
+		6.3,linux/kernel.h
+		6.4,linux/fs.h
+	7,编程习惯
+	8,Linux关于总线、设备、驱动的注册顺序
+
+
+/********************************************************************/	
+
+v4l2:
+	1,打开视频设备后，可以设置该视频设备的属性，例如裁剪、缩放等。这一步是可选的。
+	  在Linux编程中，一般使用ioctl函数来对设备的I/O通道进行管理：
+	  extern int ioctl (int __fd, unsigned long int __request, …) __THROW;
+		__fd：设备的ID，例如刚才用open函数打开视频通道后返回的cameraFd；
+		__request：具体的命令标志符。
+	  在进行V4L2开发中，一般会用到以下的命令标志符：
+		VIDIOC_REQBUFS：分配内存
+		VIDIOC_QUERYBUF：把VIDIOC_REQBUFS中分配的数据缓存转换成物理地址
+		VIDIOC_QUERYCAP：查询驱动功能
+		VIDIOC_ENUM_FMT：获取当前驱动支持的视频格式
+		VIDIOC_S_FMT：设置当前驱动的频捕获格式
+		VIDIOC_G_FMT：读取当前驱动的频捕获格式
+		VIDIOC_TRY_FMT：验证当前驱动的显示格式
+		VIDIOC_CROPCAP：查询驱动的修剪能力
+		VIDIOC_S_CROP：设置视频信号的边框
+		VIDIOC_G_CROP：读取视频信号的边框
+		VIDIOC_QBUF：将指定的Buffer放到输入队列中，即向Device表明这个Buffer可以存放东西
+		VIDIOC_DQBUF：将输出队列中的数据 buffer取出
+		VIDIOC_STREAMON：开始视频显示函数
+		VIDIOC_STREAMOFF：结束视频显示函数
+		VIDIOC_QUERYSTD：检查当前视频设备支持的标准，例如PAL或NTSC。
+		这些IO调用，有些是必须的，有些是可选择的。
+	2,操作流程:
+		1,打开设备文件:
+			int fd=open(”/dev/video0″,O_RDWR);
+		2,取得设备的capability，看看设备具有什么功能，比如是否具有视频输入,或者音频输入输出等。
+			VIDIOC_QUERYCAP,struct v4l2_capability 
+			v4l2_std_id std;
+			do {
+				ret= ioctl(fd, VIDIOC_QUERYSTD, &std);
+			} while (ret == -1 && errno == EAGAIN);
+			switch (std) {
+			case V4L2_STD_NTSC:
+			//……
+			case V4L2_STD_PAL:
+			//……
+			}
+		3,选择视频输入，一个视频设备可以有多个视频输入。VIDIOC_S_INPUT,struct v4l2_input(可不要)
+		4,设置视频的制式和帧格式，制式包括PAL，NTSC，帧的格式个包括宽度和高度等。
+			VIDIOC_S_STD,VIDIOC_S_FMT,struct v4l2_std_id,struct v4l2_format
+			struct v4l2_format fmt;
+				/*
+					v4l2_format 结构如下：
+					struct v4l2_format
+					{
+						enum v4l2_buf_type type; // 数据流类型，必须永远是V4L2_BUF_TYPE_VIDEO_CAPTURE
+						union
+						{
+							struct v4l2_pix_format pix;
+							struct v4l2_window win;
+							struct v4l2_vbi_format vbi;
+							__u8 raw_data[200];
+						} fmt;
+					};
+					struct v4l2_pix_format
+					{
+						__u32 width; // 宽，必须是16 的倍数
+						__u32 height; // 高，必须是16 的倍数
+						__u32 pixelformat; // 视频数据存储类型，例如是YUV 4 ：2 ：2 还是RGB
+						enum v4l2_field field;
+						__u32 bytesperline;
+						__u32 sizeimage;
+						enum v4l2_colorspace colorspace;
+						__u32 priv;
+					};
+				*/
+			样例：
+				memset ( &fmt, 0, sizeof(fmt) );
+				fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				fmt.fmt.pix.width = 320;
+				fmt.fmt.pix.height = 240;
+				fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
+				if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0）
+				{
+					printf("set format failed\n");
+					//return 0;
+				}
+		5,向驱动申请帧缓冲，一般不超过5个。struct v4l2_requestbuffers
+			/*
+				struct v4l2_requestbuffers
+				{
+					__u32 count; // 缓存数量，也就是说在缓存队列里保持多少张照片
+					enum v4l2_buf_type type; // 数据流类型，必须永远是V4L2_BUF_TYPE_VIDEO_CAPTURE
+					enum v4l2_memory memory; // V4L2_MEMORY_MMAP 或 V4L2_MEMORY_USERPTR
+					__u32 reserved[2];
+				};
+			*/		
+			样例：
+				struct v4l2_requestbuffers req;
+				memset(&req, 0, sizeof (req));
+				req.count = 4;
+				req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				req.memory = V4L2_MEMORY_MMAP;
+				if (ioctl(fd,VIDIOC_REQBUFS,&req) == -1)
+				{
+					perror("VIDIOC_REQBUFS error \n");
+					//return -1;
+				}
+		6,申请物理内存,将申请到的帧缓冲映射到用户空间，这样就可以直接操作采集到的帧了，
+		  而不必去复制。将申请到的帧缓冲全部入队列，以便存放采集到的数据.VIDIOC_QBUF,struct v4l2_buffer
+			VideoBuffer* buffers = calloc( req.count, sizeof(VideoBuffer) );
+			printf("sizeof(VideoBuffer) is %d\n",sizeof(VideoBuffer));
+			struct v4l2_buffer buf;
+			for (numBufs = 0; numBufs < req.count; numBufs++)
+			{
+				memset( &buf, 0, sizeof(buf) );
+				buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				buf.memory = V4L2_MEMORY_MMAP;
+				buf.index = numBufs;
+				if (ioctl(fd, VIDIOC_QUERYBUF, &buf) < 0)
+				{
+					printf("VIDIOC_QUERYBUF error\n");
+					//return -1;
+				}
+				printf("buf len is %d\n",sizeof(buf));
+				//内存映射
+				buffers[numBufs].length = buf.length;
+				buffers[numBufs].offset = (size_t) buf.m.offset;
+				buffers[numBufs].start = mmap (NULL, buf.length,PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
+				printf("buffers.length = %d,buffers.offset = %d ,buffers.start[0] = %d\n",\
+					buffers[numBufs].length,buffers[numBufs].offset,buffers[numBufs].start[0]);
+				printf("buf2 len is %d\n",sizeof(buffers[numBufs].start));
+				if (buffers[numBufs].start == MAP_FAILED)
+				{
+					perror("buffers error\n");
+					//return -1;
+				}
+				if (ioctl (fd, VIDIOC_QBUF, &buf) < 0)
+				{
+					printf("VIDIOC_QBUF error\n");
+					//return -1;
+				}
+			}
+		7,开始视频的采集。
+			enum v4l2_buf_type type;
+			type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			if (ioctl (fd, VIDIOC_STREAMON, &type) < 0)
+			{
+				printf("VIDIOC_STREAMON error\n");
+				// return -1;
+			}
+		8,出队列以取得已采集数据的帧缓冲，取得原始采集数据。VIDIOC_DQBUF, 将缓冲重新入队列尾,这样可以循环采集。VIDIOC_QBUF
+			if (ioctl(fd, VIDIOC_DQBUF, &buf) < 0)
+			{
+				perror("VIDIOC_DQBUF failed.\n");
+				//return -1;
+			}
+			buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+			buf.memory = V4L2_MEMORY_MMAP;
+			unsigned char *ptcur = buffers[numBufs].start;
+			DEBUG("buf.bytesused = %d \n",buf.bytesused);
+			int i1;
+			for(i1=0; i1<buf.bytesused; i1++)
+			{
+				if((buffers[numBufs].start[i1] == 0x000000FF) && (buffers[numBufs].start[i1+1] == 0x000000C4))
+				{
+					DEBUG("huffman table finded! \nbuf.bytesused = %d\nFFC4 = %d \n",buf.bytesused,i1);
+					break;
+				}
+			}
+			if(i1 == buf.bytesused) printf("huffman table don't exist! \n");
+			int i;
+			for(i=0; i<buf.bytesused; i++)
+			{
+				if((buffers[numBufs].start[i] == 0x000000FF) && (buffers[numBufs].start[i+1] == 0x000000D8)) break;
+				ptcur++;
+			}
+			DEBUG("i=%d,FF=%02x,D8=%02x\n",i,buffers[numBufs].start[i],buffers[numBufs].start[i+1]);
+			int imagesize =buf.bytesused - i;
+			DEBUG("buf.bytesused = %d \n",buf.bytesused);
+			DEBUG ("imagesize = %d \n",imagesize);
+		9,停止视频的采集。VIDIOC_STREAMOFF
+		10,关闭视频设备。close(fd);
+
+
+/********************************************************************/	
+
+mmap:
+	1,mmap将一个文件或者其它对象映射进内存。文件被映射到多个页上，如果文件的大小不是所有页的大小之和，
+	  最后一个页不被使用的空间将会清零。mmap在用户空间映射调用系统中作用很大。
+	2,头文件 <sys/mman.h>
+	  函数原型:
+		void* mmap(void* start,size_t length,int prot,int flags,int fd,off_t offset);
+		int munmap(void* start,size_t length);
+	3,mmap()[1]  必须以PAGE_SIZE为单位进行映射，而内存也只能以页为单位进行映射，
+	  若要映射非PAGE_SIZE整数倍的地址范围，要先进行内存对齐，强行以PAGE_SIZE的倍数大小进行映射。
+	4,参数说明:
+	  start：映射区的开始地址，设置为0时表示由系统决定映射区的起始地址。
+	  length：映射区的长度。//长度单位是 以字节为单位，不足一内存页按一内存页处理
+	  prot：期望的内存保护标志，不能与文件的打开模式冲突。是以下的某个值，可以通过or运算合理地组合在一起
+	  	PROT_EXEC //页内容可以被执行
+	  	PROT_READ //页内容可以被读取
+	  	PROT_WRITE //页可以被写入
+	  	PROT_NONE //页不可访问
+	  flags：指定映射对象的类型，映射选项和映射页是否可以共享。它的值可以是一个或者多个以下位的组合体
+	  	MAP_FIXED //使用指定的映射起始地址，如果由start和len参数指定的内存区重叠于现存的映射空间，
+			    重叠部分将会被丢弃。如果指定的起始地址不可用，操作将会失败。并且起始地址必须落在页的边界上。
+		MAP_SHARED //与其它所有映射这个对象的进程共享映射空间。对共享区的写入，相当于输出到文件。
+			     直到msync()或者munmap()被调用，文件实际上不会被更新。
+		MAP_PRIVATE //建立一个写入时拷贝的私有映射。内存区域的写入不会影响到原文件。这个标志和以上标志是互斥的，只能使用其中一个。
+		MAP_DENYWRITE //这个标志被忽略。
+		MAP_EXECUTABLE //同上
+		MAP_NORESERVE //不要为这个映射保留交换空间。当交换空间被保留，对映射区修改的可能会得到保证。
+				当交换空间不被保留，同时内存不足，对映射区的修改会引起段违例信号。
+		MAP_LOCKED //锁定映射区的页面，从而防止页面被交换出内存。
+		MAP_GROWSDOWN //用于堆栈，告诉内核VM系统，映射区可以向下扩展。
+		MAP_ANONYMOUS //匿名映射，映射区不与任何文件关联。
+		MAP_ANON //MAP_ANONYMOUS的别称，不再被使用。
+		MAP_FILE //兼容标志，被忽略。
+		MAP_32BIT //将映射区放在进程地址空间的低2GB，MAP_FIXED指定时会被忽略。当前这个标志只在x86-64平台上得到支持。
+		MAP_POPULATE //为文件映射通过预读的方式准备好页表。随后对映射区的访问不会被页违例阻塞。
+		MAP_NONBLOCK //仅和MAP_POPULATE一起使用时才有意义。不执行预读，只为已存在于内存中的页面建立页表入口。
+	  fd：有效的文件描述词。一般是由open()函数返回，其值也可以设置为-1，此时需要指定flags参数中的MAP_ANON,表明进行的是匿名映射。
+	  off_toffset：被映射对象内容的起点。
+	5,返回说明:
+	  编辑成功执行时，mmap()返回被映射区的指针，munmap()返回0。失败时，mmap()返回MAP_FAILED[其值为(void *)-1]，
+	  munmap返回-1。errno被设为以下的某个值:
+		EACCES：访问出错
+		EAGAIN：文件已被锁定，或者太多的内存已被锁定
+		EBADF：fd不是有效的文件描述词
+		EINVAL：一个或者多个参数无效
+		ENFILE：已达到系统对打开文件的限制
+		ENODEV：指定文件所在的文件系统不支持内存映射
+		ENOMEM：内存不足，或者进程已超出最大内存映射数量
+		EPERM：权能不足，操作不允许
+		ETXTBSY：已写的方式打开文件，同时指定MAP_DENYWRITE标志
+		SIGSEGV：试着向只读区写入
+		SIGBUS：试着访问不属于进程的内存区
+
+/********************************************************************/	
+
+opengl:	
+	1,glGenTextures(GLsizei n, GLuint *textures) 生成n个纹理,并把这组纹理的索引放到指针textures指向空间
+		n：用来生成纹理的数量
+		textures：指向存储纹理索引的指针(GLuint即纹理索引)
+	2,void glBindTexture(GLenum target, GLuint texture ); 给某纹理目标绑定某组纹理
+		target:纹理目标,有:
+			GL_TEXTURE_1D,
+			GL_TEXTURE_2D,
+			GL_TEXTURE_3D,
+			GL_TEXTURE_CUBE_MAP
+		texture:一组建立了的纹理的索引	
+	3,void glTexParameteri(GLenum target​, GLenum pname​, GLint param​);纹理目标贴图到指定物前,设定相关贴图设置 //未完全
+		target:纹理目标,有:
+			GL_TEXTURE_1D,
+			GL_TEXTURE_2D,
+			GL_TEXTURE_3D,
+			GL_TEXTURE_CUBE_MAP
+		pname​:设置项,有:
+			GL_DEPTH_STENCIL_TEXTURE_MODE, 
+			GL_TEXTURE_BASE_LEVEL, 
+			GL_TEXTURE_COMPARE_FUNC, 
+			GL_TEXTURE_COMPARE_MODE, 
+			GL_TEXTURE_LOD_BIAS, 
+			GL_TEXTURE_MIN_FILTER, 
+			GL_TEXTURE_MAG_FILTER, 
+			GL_TEXTURE_MIN_LOD, 
+			GL_TEXTURE_MAX_LOD, 
+			GL_TEXTURE_MAX_LEVEL, 
+			GL_TEXTURE_SWIZZLE_R, 
+			GL_TEXTURE_SWIZZLE_G, 
+			GL_TEXTURE_SWIZZLE_B, 
+			GL_TEXTURE_SWIZZLE_A, 
+			GL_TEXTURE_WRAP_S, 
+			GL_TEXTURE_WRAP_T, 
+			GL_TEXTURE_WRAP_R.
+			
+/********************************************************************/	
+
+指针问题;
+	1,例,
+		class AA  public:A
+		(
+			AA()
+			AA(int b,int c)
+			....
+		)
+		AA a1;//调用AA()构造
+		AA *a2;
+		a2 = new AA();//也是调用AA()构造
+		AA *a3;
+		a3 = new AA(b1,c2);//调用AA(int b,int c)
+		AA a4(b2,c3); //那么能这样调用AA(int b,int c)构造对象a4吗? 而且a4,不同于a3,不是一个指向AA类对象的指针,而是一个AA类对象?????
+
+
+/********************************************************************/	
+
+奇怪语法问题:
+	1,例,
+		class SerialPortThread:public QThread
+		{
+			int A;
+			QSerialPort::Parity parity;
+			....
+		}
+		class Q_SERIALPORT_EXPORT QSerialPort : public QIODevice
+		{
+			enum Parity {
+		        NoParity = 0,
+		        EvenParity = 2,
+		        OddParity = 3,
+		        SpaceParity = 4,
+		        MarkParity = 5,
+		        UnknownParity = -1
+			};
+			....
+		)
+		SerialPortThread()
+			{
+			parity = QSerialPort::NoParity;//即 = 0
+			....
+		}
+		这里涉及到c++语法内容,Parity是QSerialPort类里的一个枚举数据项,这里并没有建立QSerialPort类对象,
+		却是直接建立了一个 QSerialPort类蕴含的枚举数据Parity项 的数据parity
+		这个数据parity是SerialPortThread类蕴含的内容,
+		而现在SerialPortThread类对象构造时,赋予了这个数据parity的值是 QSerialPort类蕴含的枚举数据Parity项中的 NoParity项
+		赋予了这个数据parity的值即是 QSerialPort::NoParity, 即0!!
+
+/********************************************************************/
+
+linux驱动头文件位置的说明
+	1,在不同版本的内核源码上，头文件所在的位置是不同的，比如:
+		#include<asm/arch/regs-gpio.h> //2.6.25版本`
+		#include<mach/regs-gpio.h> //2.6.30版本
+	2,#include <linux/***.h> 是在linux-2.6.29/include/linux下面寻找源文件。
+	  #include <asm/***.h> 是在linux-2.6.29/arch/arm/include/asm下面寻找源文件。
+	  #include <mach/***.h> 是在linux-2.6.29/arch/arm/mach-s3c2410/include/mach下面寻找源文件。
+	  #include<plat/regs-adc.h>在linux-2.6.31_TX2440A20100510\linux-2.6.31_TX2440A\arch\arm\plat-s3c\include\plat
+
+/********************************************************************/
+
+linux/init.h
+	1,在init.h头文件中包含了模块的初始化的宏定义 以及一些其他函数的初始化函数,例如常见的:
+		#define module_init(x)
+		__initcall(x);
+		#define module_exit(x)
+		__exitcall(x);
+	2,初始化头文件
+
+/********************************************************************/
+
+linux/kernel.h
+	1,kernel.h中包含了内核打印函数 printk函数,定义了如数据结构int,float等的大小之类内容
+	2,驱动要写入内核，与内核相关的头文件
+
+/********************************************************************/
+
+linux/module.h
+	1,kobject，kset结构体题及其操作函数也在这个结构体中，，，
+	  其实学习头文件最好的方法就是仔细的看头文件--看看有哪些功能就好用的时候再查阅 
+	  写内核驱动的时候 必须加载这个头文件，作用是动态的将模块加载到内核中去,例如:
+		MODULE_GENERIC_TABLE(gtype,name)
+		MODULE_GENERIC_TABLE(gtype,name)
+		MODULE_INFO(tag, info) __MODULE_INFO(tag, tag, info)
+		MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)
+		MODULE_PARM_DESC(_parm, desc)
+		MODULE_DEVICE_TABLE(type,name)
+		MODULE_FIRMWARE(_firmware) MODULE_INFO(firmware, _firmware)
+	2,最基本的文件，支持动态添加和卸载模块
+	3,MODULE_LICENSE("GPL");内核认识的特定许可有, 
+			"GPL"( 适用 GNU 通用公共许可的任何版本 ), 
+			"GPL v2"( 只适用 GPL 版本 2 ), 
+			"GPL and additional rights", 
+			"Dual BSD/GPL", 
+			"Dual MPL/GPL", 
+			"Proprietary".
+		除非你的模块明确标识是在内核认识的一个自由许可下, 否则就假定它是私有的,内核在模块加载时被"弄污浊"了. 
+		象我们在第 1 章"许可条款"中提到的, 内核开发者不会热心帮助在加载了私有模块后遇到问题的用户.
+	4,MODULE_AUTHOR ( 声明谁编写了模块 ), 
+	5,MODULE_DESCRIPION( 一个人可读的关于模块做什么的声明 ), 
+	6,MODULE_VERSION ( 一个代码修订版本号; 看 <linux/module.h> 的注释以便知道创建版本字串使用的惯例), 
+	7,MODULE_ALIAS ( 模块为人所知的另一个名子 ), 
+	8,MODULE_DEVICE_TABLE ( 来告知用户空间, 模块支持那些设备 ).
+
+/********************************************************************/
+
+linux/errno.h
+	1,包含了对返回值的宏定义，这样用户程序可以用perror输出错误信息。
+
+/********************************************************************/
+
+linux/types.h
+	1,对一些特殊类型的定义，其实这些类型大部分都是unsigned int型通过一连串的typedef变过来的，只是为了方便阅读。例如:
+		dev_t
+		off_t
+		pid_t
+		size_t
+
+/********************************************************************/
+
+linux/wait.h
+	1,等待队列相关头文件,内核等待队列，它包含了自旋锁的头文件
+ 		wake_up_interruptible   唤醒 q 指定的注册在等待队列上的进程。该函数不能直接的立即唤醒进程，
+					而是由调度程序转换上下文，调整为可运行状态。  
+		static DECLARE_WAIT_QUEUE_HEAD(button_waitq);声明等待队列为全局变量
+		wait_event_interruptible该函数修改task的状态为TASK_INTERRUPTIBLE，意味着改进程将不会继续运行直到被唤醒，
+					然后被添加到等待队列wq中
+
+/********************************************************************/
+
+linux/fs.h
+	1,包含了文件操作相关struct的定义，例如:
+		struct file_operations
+		struct inode_operations
+		struct super_operations
+
+/********************************************************************/
+
+linux/cdev.h
+
+	1,对字符设备结构cdev以及一系列的操作函数的定义,包含了cdev 结构及相关函数的定义。例如:
+		* void cdev_init(struct cdev *, 
+		const struct file_operations *);
+		struct cdev *cdev_alloc(void);
+		void cdev_put(struct cdev *p);
+		int cdev_add(struct cdev *, dev_t, unsigned);
+		void cdev_del(struct cdev *);
+		void cd_forget(struct inode *); 
+
+
+/********************************************************************/
+
+linux/miscdevice.h　
+	1,包含了miscdevice(杂项设备)结构的定义及相关的操作函数。　　　
+	2,extern int misc_register(struct miscdevice * misc);　　注册miscdevice结构体成员变量设备
+	3,extern int misc_deregister(struct miscdevice *misc);　　注销miscdevice结构体成员变量设备
+
+/********************************************************************/
+
+linux/slab.h>
+	1,包含了内存分配函数的定义:
+		kcalloc()
+		kzalloc()
+
+/********************************************************************/
+
+linux/uaccess.h
+	1,包含了内核访问用户进程内存地址的函数定义。
+		copy_to_user、
+		copy_from_user
+
+/********************************************************************/
+
+linux/device.h
+	2,包含的结构的定义例如
+		device、
+		class 、
+		device_driver
+
+/********************************************************************/
+
+linux/io.h
+	1,包含了内核访问IO内存等函数的定义。
+		__raw_readl 
+		__raw_writel
+		ioremap、
+		iowrite
+
+/********************************************************************/
+
+linux/interrupt.h
+	1,使用中断必须的头文件
+
+/********************************************************************/
+
+mach/irqs.h
+	1,使用中断必须的头文件
+
+/********************************************************************/
+
+asm/bitops.h
+	1,包含set_bit等位操作函数，实现Input子系统时可用。
+
+/********************************************************************/
+
+linux/semaphore.h
+	1,使用信号量必须的头文件
+
+/********************************************************************/
+
+linux/spinlock.h>
+	1,自旋锁
+
+/********************************************************************/
+
+linux/sched.h
+	1,内核等待队列中要使用的TASK_NORMAL、TASK_INTERRUPTIBLE包含在这个头文件
+
+/********************************************************************/
+
+linux/kfifo.h
+	1,fifo环形队列
+
+/********************************************************************/
+
+linux/timer.h
+	1,内核定时器
+
+/********************************************************************/
+
+linux/input.h
+	1,中断处理 
+
+/********************************************************************/
+
+#linux/delay.h
+	1,延时头文件
+
+/********************************************************************/
+
+asm/irq.h
+	1,与处理器相关的中断
+
+/********************************************************************/
+
+linux/interrupt.h
+	1,操作系统中断,例如:
+		typedef irqreturn_t (*irq_handler_t)(int, void *);
+		extern void free_irq(unsigned int, void *);extern void disable_irq(unsigned int irq);
+		extern void enable_irq(unsigned int irq);  
+
+/********************************************************************/
+
+asm/uaccess.h
+	1,与处理器相关的入口
+
+/********************************************************************/
+
+mach/regs-gpio.h
+	1,与处理器相关的IO口操作
+	2,和GPIO口相关的一些宏定义（在arch/arm/mach-s3c2410/mach）
+
+/********************************************************************/
+
+mach/hardware.h
+	1,与处理器相关的硬件
+
+/********************************************************************/
+
+linux/poll.h
+	1,轮询文件
+		poll_wait
+
+/********************************************************************/
+
+linux/gpio.h
+	1,操作系统相关的IO口文件
+
+/********************************************************************/
+
+stdio.h
+	1,标准输入输出
+
+/********************************************************************/
+
+stdlib.h
+	1,标准库
+
+/********************************************************************/
+
+unistd.h
+	1,关于文件操作标准库
+
+/********************************************************************/
+
+sys/ioctl.h
+	1,IO控制
+
+/********************************************************************/
+
+mach/hardware.h
+	1,和GPIO口操作相关的函数定义的头文件,对应的源文件在/linux-2.6.32.2/arch/arm/plat-s3c24xx/gpio.c
+		void s3c2410_gpio_cfgpin(unsigned int pin, unsigned int function);
+		unsigned int s3c2410_gpio_getcfg(unsigned int pin);
+		void s3c2410_gpio_pullup(unsigned int pin, unsigned int to);
+		int s3c2410_gpio_getpull(unsigned int pin);
+		void s3c2410_gpio_setpin(unsigned int pin, unsigned int to);
+　		unsigned int s3c2410_gpio_getpin(unsigned int pin);
+		unsigned int s3c2410_modify_misccr(unsigned int clear, unsigned int change);
+		int s3c2410_gpio_getirq(unsigned int pin);
+		int s3c2410_gpio_irq2pin(unsigned int irq);
+
+/********************************************************************/
+ 
+linux/clk.h　
+	1,struct clk *clk_get(struct device *dev, const char *id);
+	  unsigned long clk_get_rate(struct clk *clk); 
+
+/********************************************************************/
+
+plat/clock.h
+	1,struct clk;结构体的定义 （在arch/arm/plat-s3c/plat/include/clock.arch中，对应的源文件在/arm/plat-s3c/clock.c)
+
+/********************************************************************/
+
+
+
+
+头文件主目录include
+
+头文件目录中总共有32个.h头文件。其中主目录下有13个，asm子目录中有4个，linux子目录中有10个，sys子目录中有5个。这些头文件各自的功能如下，具体的作用和所包含的信息请参见第14章。
+
+<a.out.h>：a.out头文件，定义了a.out执行文件格式和一些宏。
+
+<const.h>：常数符号头文件，目前仅定义了i节点中i_mode字段的各标志位。
+
+<ctype.h>：字符类型头文件，定义了一些有关字符类型判断和转换的宏。
+
+<errno.h>：错误号头文件，包含系统中各种出错号。(Linus从minix中引进的)。
+
+<fcntl.h>：文件控制头文件，用于文件及其描述符的操作控制常数符号的定义。
+
+<signal.h>：信号头文件，定义信号符号常量，信号结构以及信号操作函数原型。
+
+<stdarg.h>：标准参数头文件，以宏的形式定义变量参数列表。主要说明了一个类型（va_list）和3个宏（va_start, va_arg和va_end），用于vsprintf、vprintf、vfprintf函数。
+
+<stddef.h>：标准定义头文件，定义了NULL, offsetof(TYPE, MEMBER)。
+
+<string.h>：字符串头文件，主要定义了一些有关字符串操作的嵌入函数。
+
+<termios.h>：终端输入输出函数头文件，主要定义控制异步通信口的终端接口。
+
+<time.h>：时间类型头文件，主要定义了tm结构和一些有关时间的函数原形。
+
+<unistd.h>：Linux标准头文件，定义了各种符号常数和类型，并声明了各种函数。如，定义了__LIBRARY__，则还包括系统调用号和内嵌汇编_syscall0()等。
+
+<utime.h>：用户时间头文件，定义了访问和修改时间结构以及utime()原型。
+
+（1）体系结构相关头文件子目录include/asm
+
+这些头文件主要定义了一些与CPU体系结构密切相关的数据结构、宏函数和变量。共4个文件。
+
+<asm/io.h>：I/O头文件，以宏的嵌入汇编程序形式定义对I/O端口操作的函数。
+
+<asm/memory.h>：内存拷贝头文件，含有memcpy()嵌入式汇编宏函数。
+
+<asm/segment.h>：段操作头文件，定义了有关段寄存器操作的嵌入式汇编函数。
+
+<asm/system.h>：系统头文件，定义了设置或修改描述符/中断门等的嵌入式汇编宏。
+
+（2）Linux内核专用头文件子目录include/linux
+
+<linux/config.h>：内核配置头文件，定义键盘语言和硬盘类型（HD_TYPE）可选项。
+
+<linux/fdreg.h>：软驱头文件，含有软盘控制器参数的一些定义。
+
+<linux/fs.h>：文件系统头文件，定义文件表结构（file,buffer_head,m_inode等）。
+
+<linux/hdreg.h>：硬盘参数头文件，定义访问硬盘寄存器端口、状态码和分区表等信息。
+
+<linux/head.h>：head头文件，定义了段描述符的简单结构，和几个选择符常量。
+
+<linux/kernel.h>：内核头文件，含有一些内核常用函数的原形定义。
+
+<linux/mm.h>：内存管理头文件，含有页面大小定义和一些页面释放函数原型。
+
+<linux/sched.h>： 调度程序头文件，定义了任务结构task_struct、初始任务0的数据，
+
+以及一些有关描述符参数设置和获取的嵌入式汇编函数宏语句。
+
+<linux/sys.h>：系统调用头文件，含有72个系统调用C函数处理程序,以"sys_"开头。
+
+<linux/tty.h>：tty头文件，定义了有关tty_io，串行通信方面的参数、常数。
+
+（3）系统专用数据结构子目录include/sys
+
+<sys/stat.h>： 文件状态头文件，含有文件或文件系统状态结构stat{}和常量。
+
+<sys/times.h>：定义了进程中运行时间结构tms以及times()函数原型。
+
+<sys/types.h>：类型头文件，定义了基本的系统数据类型。
+
+<sys/utsname.h>：系统名称结构头文件。
+
+<sys/wait.h>：等待调用头文件，定义系统调用wait()和waitpid()及相关常数符号。
+
+
+/********************************************************************/	
+
+编程习惯:
+	1,#if 0
+	  xxxxxx
+	  #endif  //取代/** xxxx **/来注释一段代码
+
+
+
+
+
+/********************************************************************/	
+
+Linux关于总线、设备、驱动的注册顺序
+
+原址:http://zhidao.baidu.com/link?url=1sNAFrET38NSTJeBjhY_9ITS265FEnxv5qkivDRwgb2hvIKI3iM86PVfIwdCAyihJ-Xed0RCXKMfIXE_eDYIaa
+
+设备挂接到总线上时，与总线上的所有驱动进行匹配(用bus_type.match进行匹配)，
+如果匹配成功,则调用bus_type.probe或者driver.probe初始化该设备，挂接到总线上
+如果匹配失败，则只是将该设备挂接到总线上。
+
+驱动挂接到总线上时，与总线上的所有设备进行匹配(用bus_type.match进行匹配)，
+如果匹配成功,则调用bus_type.probe或者driver.probe初始化该设备；挂接到总线上
+如果匹配失败，则只是将该驱动挂接到总线上。
+
+需要重点关注的是总线的匹配函数match()，驱动的初始化函数probe()
+
+1. platform_bus_type--总线先被kenrel注册。
+
+2. 系统初始化过程中调用platform_add_devices或者platform_device_register，将平台设备(platform devices)注册到平台总线中(platform_bus_type)
+3. 平台驱动(platform driver)与平台设备(platform device)的关联是在platform_driver_register或者driver_register中实现，一般这个函数在驱动的初始化过程调用。
+
+通过这三步，就将平台总线，设备，驱动关联起来。
+
+1. platform bus先被kenrel注册。
+------------------------------------------------------
+do_basic_setup() -->-driver_init() -->-platform_bus_init()-->bus_register()
+
+2. 系统初始化过程中调用platform_add_devices或者platform_device_register，将平台设备(platform devices)注册到平台总线中(platform_bus_type)
+------------------------------------------------------
+系统启动阶段，总线的驱动链表还是空的，所以启动阶段的platform_add_devices()只负责将设备添加到总线的设备链表上。 
+
+
+在内核源代码中，platform 设备的初始化（注册）用arch_initcall（）调用，它的initcall 的level为3；而驱动的注册用module_init（）调用，即device_initcall（），它的initcall 的level为6。
+kernel 初始化时（kernel_init@init/main.c），按照内核链接文件中（arm系统：kernel/arch/arm/vmlinux.lds）的__initcall_start段的序列依次执行，这样level小的初始化函数先于level大的初始化函数被调用。
+所以platform设备先被注册，驱动加载时会调用驱动程序中的probe（），扫描系统中已注册的设备，找到匹配设备后将驱动和设备绑定。
+
+
+追问：
+嗯对platform也许你是正确的，因为一般的platform设备注册是由内核完成的，你只需要写过设备名字就好。但是回到device_register和driver_registe的先后的话，你的回答就没用了，驱动和设备先后注册没有影响，也不是你所说的那样具有先后的调用关系。
+追答：
+1、一些通用的设备的注册采用优先级高于module_init()的调用方式，如subsys_initcall（），这样与这些设备相关的驱动会后于它们加载，驱动中可以扫描到这些设备；
+2、另一些比较独立的设备在驱动中直接注册，它内嵌于驱动之中（如放在驱动中的probe()函数中），当驱动卸载时，设备也会同时卸载。这种设备的系统调用顺序上看是driver_registe（）-->device_register（），它们不是先后关系，而是包含关系。
+追问：
+嗯，并不是你说的2里面的那种情况，就是
+driver_register先于device_register执行，也没有出现于嵌套之中，而且这种方法不常用
+你说的1倒是有很多地方出现，比如I2C，适配器先需要于设备注册。
+追答：
+我明白了，你说的是另一种情况，象USB 的hcd驱动一样，先注册驱动，后注册设备。
+在注册设备时，遍历设备所在总线，找到与设备匹配的驱动，再调用device_attach（）--> driver_probe_device（）时的情况。
+这时，会调用设备所在总线的probe()函数，如果没有这个函数，则调用匹配到的驱动的probe()函数，这样驱动的扫描函数就被执行了。当然如果前面一步没有找到与要注册的设备匹配的驱动，这个设备注册也就失败了。
+先注册设备的那种情况，是调用driver_attach（）-->driver_probe_device（），后面情况就一样了。
+
+
+而platform_device并不是与字符设备、块设备并列的概念，而是Linux系统提供的一种管理设备的手段，所有SOC系统中集成的独立的外设控制器、挂接在SOC内存空间的外设等都属Platform设备。如ARM S3C6410处理器中，把内部集成的I2C、PTC、SPI、LCD、看门狗控制器都归纳为Platform设备，而这些设备本身就是字符设备。由此可见Platform中的设备是不分字符设备还是块设备。 
+字符设备和块设备的区别在于前者只能被顺序读写，后者可以随机访问。大多数设备为字符设备，以字节为单位，实现file_operations结构体。而如磁盘为块设备，以块为单位接受输入和返回输出。实现block_device_operations结构体.
+
+
+
+

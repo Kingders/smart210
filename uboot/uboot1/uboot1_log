@@ -1,0 +1,233 @@
+一不留神删了一个月的成果,很多有价值的笔记丢失,现在着重各种备份
+重新编译一次,只记下重要内容:
+
+版本u-boot-2014.04
+
+uboot流程:
+spl:
+/arch/arm/cpu/armv7/start.S:reset
+	->save_boot_params	//保存启动参数
+	->关 FIQ and IRQ 中断,转到 svc 模式
+	-> cpu_init_cp15	//操作cp15协处理器,关mmu cache之类操作
+	-> cpu_init_crit	//跳到board/samsung/smart210/lowlevel_init.S:lowlevel_init
+		->clock_init	/* 时钟初始化 c程序 */	spl便可以执行c程序,是因为svc模式下,有一默认的栈区在 ISRAM 里
+		->ddr_init	/* DDR初始化  c程序 */
+	->_main		//跳到arch/arm/lib/crt0.S
+		-> copy_bl2_to_ram	/* 拷贝BL2到DDR */
+		-> 跳转到DDR的起始地址执行BL2
+
+
+/*************************** 配置 spl: 成功 **********************************/
+
+顶层目录下的 boards.cfg 中添加自己的单板的硬件配置信息,仿照 smdkc100:
+Active arm armv7 s5pc1xx samsung smart210 smart210 - kingders <418128064@qq.com>
+
+board 目录下创建一个用于存储单板相关代码文件的目录board/samsung/smart210
+修改对应Makefile:obj-y	:= smart210.o
+
+直接修改主目录 Makefile,添加一行 CROSS_COMPILE ?= arm-linux-
+
+为自己的单板创建配置文件 include/configs/smart210.h 添加宏:
+#define CONFIG_SPL 
+
+arch/arm/include/asm/arch-s5pc1xx/cpu.h 中
+添加与 S5PV210 相关的寄存器定义
+#define S5PV210_PRO_ID		0xE0000000
+#define S5PV210_CLOCK_BASE	0xE0100000
+#define S5PV210_GPIO_BASE	0xE0200000
+#define S5PV210_PWMTIMER_BASE	0xE2500000
+#define S5PV210_WATCHDOG_BASE	0xE2700000
+#define S5PV210_UART_BASE	0xE2900000
+#define S5PV210_SROMC_BASE	0xE8000000
+#define S5PV210_MMC_BASE	0xEB000000
+#define S5PV210_DMC0_BASE	0xF0000000
+#define S5PV210_DMC1_BASE	0xF1400000
+#define S5PV210_VIC0_BASE	0xF2000000
+#define S5PV210_VIC1_BASE	0xF2100000
+#define S5PV210_VIC2_BASE	0xF2200000
+#define S5PV210_VIC3_BASE	0xF2300000
+#define S5PV210_NAND_BASE	0xB0E00000
+#define S5PV210_LCD_BASE	0xF8000000
+修改samsung base 宏:
+#define SAMSUNG_BASE(device, base)				\
+static inline unsigned int samsung_get_base_##device(void)	\
+{									\
+	return S5PV210_##base;		\
+}
+添加宏项目:
+SAMSUNG_BASE(clock, CLOCK_BASE)
+SAMSUNG_BASE(dmc0, DMC0_BASE)
+SAMSUNG_BASE(dmc1, DMC1_BASE)
+
+修改 board/samsung/smart210/lowlevel_init.S 添加:
+#ifdef CONFIG_SPL_BUILD
+	bl clock_init		/* 时钟初始化 */
+	bl ddr_init		/* DDR初始化 */
+#endif
+
+在board/samsung/smart210/smart210.c	
+添加头文件 :
+#include <asm/arch/clock.h>		/* add by zjh */
+#include <asm/arch/dmc.h>		/* add by zjh */
+实现clock_init ddr_init 定义
+
+/arch/arm/include/asm/arch-s5pc1xx/clock.h 中添加 S5PV210 的时钟相关寄存器的定义
+struct s5pv210_clock {
+	unsigned int	apll_lock;
+	unsigned char	res1[0x04];
+	unsigned int	mpll_lock;
+	unsigned char	res2[0x04];
+	unsigned int	epll_lock;
+	unsigned char	res3[0x0C];
+	unsigned int	vpll_lock;
+	unsigned char	res4[0xdc];
+	unsigned int	apll_con0;
+	unsigned int	apll_con1;
+	unsigned int	mpll_con;
+	unsigned char	res5[0x04];
+	unsigned int	epll_con0;
+	unsigned int	epll_con1;
+	unsigned char	res6[0x08];
+	unsigned int	vpll_con;
+	unsigned char	res7[0xdc];
+	unsigned int	src0;
+	unsigned int	src1;
+	unsigned int	src2;
+	unsigned int	src3;
+	unsigned int	src4;
+	unsigned int	src5;
+	unsigned int	src6;
+	unsigned char	res8[0x64];
+	unsigned int	mask0;
+	unsigned int	mask1;
+	unsigned char	res9[0x78];
+	unsigned int	div0;
+	unsigned int	div1;
+	unsigned int	div2;
+	unsigned int	div3;
+	unsigned int	div4;
+	unsigned int	div5;
+	unsigned int	div6;
+	unsigned int	div7;
+};
+
+编写/arch/arm/include/asm/arch-s5pc1xx/dmc.h
+struct s5pv210_dmc0 {
+	unsigned int	concontrol;
+	unsigned int	memcontrol;
+	unsigned int	memconfig0;
+	unsigned int	memconfig1;
+	unsigned int	directcmd;
+	unsigned int	prechconfig;
+	unsigned int	phycontrol0;
+	unsigned int	phycontrol1;
+	unsigned char	res1[0x08];
+	unsigned int	pwrdnconfig;
+	unsigned char	res2[0x04];
+	unsigned int	timingaref;
+	unsigned int	timingrow;
+	unsigned int	timingdata;
+	unsigned int	timingpower;
+	unsigned int	phystatus;
+	unsigned int	chip0status;
+	unsigned int	chip1status;
+	unsigned int	arefstatus;
+	unsigned int	mrstatus;
+	unsigned int	phytest0;
+	unsigned int	phytest1;
+};
+struct s5pv210_dmc1 {
+	unsigned int	concontrol;
+	unsigned int	memcontrol;
+	unsigned int	memconfig0;
+	unsigned int	memconfig1;
+	unsigned int	directcmd;
+	unsigned int	prechconfig;
+	unsigned int	phycontrol0;
+	unsigned int	phycontrol1;
+	unsigned char	res1[0x08];
+	unsigned int	pwrdnconfig;
+	unsigned char	res2[0x04];
+	unsigned int	timingaref;
+	unsigned int	timingrow;
+	unsigned int	timingdata;
+	unsigned int	timingpower;
+	unsigned int	phystatus;
+	unsigned int	chip0status;
+	unsigned int	chip1status;
+	unsigned int	arefstatus;
+	unsigned int	mrstatus;
+	unsigned int	phytest0;
+	unsigned int	phytest1;
+};
+
+/arch/arm/lib/crt0.S 修改,
+#if !defined(CONFIG_SPL_BUILD)			//在spl里不用另外设置栈sp
+	ldr	sp, =(CONFIG_SYS_INIT_SP_ADDR)
+	bic	sp, sp, #7	/* 8-byte alignment for ABI compliance */
+	sub	sp, sp, #GD_SIZE	/* allocate one GD above SP */
+	bic	sp, sp, #7	/* 8-byte alignment for ABI compliance */
+	mov	r9, sp		/* GD is above SP */
+	mov	r0, #0
+#endif
+	/* modied by zjh */
+#ifdef CONFIG_SPL_BUILD
+	bl copy_bl2_to_ram			/* 拷贝BL2到DDR */
+	ldr pc, =CONFIG_SYS_SDRAM_BASE		/* 跳转到DDR的起始地址执行BL2 */
+#else
+	bl	board_init_f
+#endif
+
+添加制作头工具,因为s5pv210要求一个16字节的头!!
+从嵌入笔记裸机程序拷入addheader.c,
+gcc addheader.c -o mk210 制作头工具
+把 mk210 放入tools
+修改spl/Makefile:
+$(obj)/$(BOARD)-spl.bin: $(obj)/u-boot-spl.bin
+	$(if $(wildcard $(objtree)/spl/board/samsung/$(BOARD)/tools/mk$(BOARD)spl),\
+	$(objtree)/spl/board/samsung/$(BOARD)/tools/mk$(BOARD)spl,\
+	$(objtree)/tools/mk210) $(VAR_SIZE_PARAM) $< $@		//把加头工具改为mk210
+
+mkae smart210_config
+make spl/u-boot-spl.bin -j4
+log:
+  GEN     include/autoconf.mk.dep
+  GEN     include/autoconf.mk
+cc1: error: bad value (armv5) for -march= switch
+cc1: error: bad value (armv5) for -march= switch
+  CHK     include/config/uboot.release
+  CHK     include/generated/timestamp_autogenerated.h
+  UPD     include/generated/timestamp_autogenerated.h
+  HOSTCC  scripts/basic/fixdep
+  UPD     include/config/uboot.release
+  CHK     include/generated/version_autogenerated.h
+  UPD     include/generated/version_autogenerated.h
+  CC      lib/asm-offsets.s
+  CC      arch/arm/lib/asm-offsets.s
+arch/arm/lib/asm-offsets.c:1:0: error: bad value (armv5) for -march= switch
+lib/asm-offsets.c:1:0: error: bad value (armv5) for -march= switch
+make[1]: *** [arch/arm/lib/asm-offsets.s] Error 1
+make[1]: *** Waiting for unfinished jobs....
+make[1]: *** [lib/asm-offsets.s] Error 1
+make: *** [prepare0] Error 2
+出错原因!!!!!主目录 Makefile 设置CROSS_COMPILE不正确
+不应该修改原来的这个地方!!!
+ifeq ($(HOSTARCH),$(ARCH))
+CROSS_COMPILE ?= 
+endif
+而是在# Make variables (CC, etc...)下添加
+# add by zjh
+CROSS_COMPILE = arm-linux-
+最后成功编译
+
+写入sd卡seek=1 位置		//误删导致对dd命令的笔记也没了,尼玛 
+sudo dd bs=512 iflag=dsync oflag=dsync if=spl/smart210-spl.bin of=/dev/sdb seek=1 //注意u-boot-spl.bin是还没有写头的spl
+//印象中dd命令是 把if路径的文件的内容,写入到of路径文件的 第seek块始的位置
+sudo dd bs=512 iflag=dsync oflag=dsync if=/tftpboot/lcd.bin of=/dev/sdb seek=32		//放入测试文件,成功!!
+//注意这个测试文件只能串口成功,lcd并没有点亮,由于lcd为源的友善一线触摸屏设备
+
+
+/******************************** uboot 重定位 *****************************************/
+
+
+

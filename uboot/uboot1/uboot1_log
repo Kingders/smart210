@@ -427,7 +427,7 @@ sudo dd bs=512 iflag=dsync oflag=dsync if=u-boot.bin of=/dev/sdb seek=32
 现在可以按 Tab 键自动补全命令了,同时可以按上下键查看历史命令。
 
 
-/******************************** 移植网卡 DM9000 *****************************************/
+/******************************** 移植网卡 DM9000 成功 *****************************************/
 注意,我们的网卡的中断针口接的是XEINT7!!! 不过貌似uboot移植用不着
 
 关于SROM控制器的说明也因为误删而丢失了,不过,重点记住
@@ -484,9 +484,11 @@ include/configs/smart210.h
 /* add by zjh */
 #define CONFIG_DRIVER_DM9000
 #define CONFIG_DM9000_NO_SROM
-#define CONFIG_DM9000_BASE		0x88000000
-#define DM9000_IO				(CONFIG_DM9000_BASE)
-#define DM9000_DATA				(CONFIG_DM9000_BASE + 0x4)
+#define CONFIG_DM9000_BASE		0x88000000	//srom bank1 基地址
+#define DM9000_IO				(CONFIG_DM9000_BASE)	//应对dm9000地址端时,要求的srom的地址
+#define DM9000_DATA				(CONFIG_DM9000_BASE + 0x4)//应对dm9000数据端时,要求的srom的地址
+									  //这里的 DM9000A_DATA 定义为基地址+0x4,
+									  //刚好把 Xm0ADDR2 拉高,即把 CMD 拉高
 #define CONFIG_CMD_PING
 #define CONFIG_IPADDR			192.168.2.120
 #define CONFIG_SERVERIP			192.168.2.227		//后来tftp的服务器地址
@@ -506,7 +508,8 @@ board.c 中的 board_init_r
 		->board_eth_init //在 u-boot-2014.04/board/samsung/smdkv210/smart210.c	初始化ethernet 
 			->dm9000_initialize //在 drivers/net/DM9000Ax.c
 
-
+drivers/net/Makefile
+obj-$(CONFIG_DRIVER_DM9000) += dm9000x.o
 
 board/samsung/smdkv210/smart210.c
 屏蔽smc9115_pre_init
@@ -544,6 +547,28 @@ int board_eth_init(bd_t *bis)
 #endif
 	return rc;
 }
+
+drivers/net/DM9000Ax.c
+int dm9000_initialize(bd_t *bis)
+{
+	struct eth_device *dev = &(dm9000_info.netdev);
+
+	/* Load MAC address from EEPROM */
+	dm9000_get_enetaddr(dev);
+
+	dev->init = dm9000_init;
+	dev->halt = dm9000_halt;
+	dev->send = dm9000_send;
+	dev->recv = dm9000_rx;
+	sprintf(dev->name, "dm9000");
+
+	eth_register(dev);
+
+	return 0;
+}
+
+补充,如果我们想使用一些命令,可以查看include/config_cmd_all.h
+知道uboot都支持那些命令,如果需要,拷对应宏到smart210.h里
 
 
 

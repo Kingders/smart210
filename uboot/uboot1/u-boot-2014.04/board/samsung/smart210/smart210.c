@@ -12,7 +12,7 @@
 #include <asm/arch/gpio.h>
 #include <asm/arch/clock.h>		/* add by zjh */
 #include <asm/arch/dmc.h>		/* add by zjh */
-//#include <asm/arch/nand_reg.h>	/* add by zjh */
+#include <asm/arch/nand_reg.h>	/* add by zjh */
 #include <netdev.h>
 
 #ifndef CONFIG_SPL_BUILD	/* add by zjh */
@@ -88,7 +88,7 @@ void dram_init_banksize(void)
 int checkboard(void)
 {
 	/* modied by zjh */
-	printf("Board:\tSMDKV210\n");
+	printf("Board:\tSMART210\n");
 	return 0;
 }
 #endif
@@ -266,7 +266,7 @@ void copy_bl2_to_ram(void)
 	
 	if (OM == 0x2)				// NAND 2 KB, 5cycle 8-bit ECC
 	{
-#if 0
+#if 1
 		u32 cfg = 0;
 		struct s5pv210_nand *nand_reg = (struct s5pv210_nand *)(struct s5pv210_nand *)samsung_get_base_nand();
 		

@@ -143,7 +143,7 @@
  */
 #define CONFIG_SYS_LONGHELP		/* undef to save memory */
 #define CONFIG_SYS_HUSH_PARSER		/* use "hush" command parser	*/
-#define CONFIG_SYS_PROMPT		"SMDKV210 # "	/* modied by zjh */
+#define CONFIG_SYS_PROMPT		"SMART210 # "	/* modied by zjh */
 #define CONFIG_SYS_CBSIZE	256	/* Console I/O Buffer Size */
 #define CONFIG_SYS_PBSIZE	384	/* Print Buffer Size */
 #define CONFIG_SYS_MAXARGS	16	/* max number of command args */
@@ -154,10 +154,10 @@
 #define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_SDRAM_BASE + 0x5e00000)
 #define CONFIG_SYS_LOAD_ADDR		CONFIG_SYS_SDRAM_BASE
 
-/* SMDKC100 has 1 banks of DRAM, we use only one in U-Boot */
+/* SMART210 has 1 banks of DRAM, we use only one in U-Boot */
 #define CONFIG_NR_DRAM_BANKS	1
 #define PHYS_SDRAM_1		CONFIG_SYS_SDRAM_BASE	/* SDRAM Bank #1 */
-#define PHYS_SDRAM_1_SIZE	(1024 << 20)	/* 0x40000000, 1024 MB Bank #1 (modied by zjh) */
+#define PHYS_SDRAM_1_SIZE	(512 << 20)	/* 0x20000000, 512 MB Bank #1 (modied by zjh) */
 
 #define CONFIG_SYS_MONITOR_BASE	0x00000000
 
@@ -167,7 +167,7 @@
 #define CONFIG_SYS_NO_FLASH		1
 
 #define CONFIG_SYS_MONITOR_LEN		(256 << 10)	/* 256 KiB */
-#define CONFIG_IDENT_STRING		" for SMDKV210"	/* modied by zjh */
+#define CONFIG_IDENT_STRING		" for SMART210"	/* modied by zjh */
 
 #if !defined(CONFIG_NAND_SPL) && (CONFIG_SYS_TEXT_BASE >= 0xc0000000)
 #define CONFIG_ENABLE_MMU
@@ -219,18 +219,20 @@
 #define DM9000_IO				(CONFIG_DM9000_BASE)
 #define DM9000_DATA				(CONFIG_DM9000_BASE + 0x4)
 #define CONFIG_CMD_PING
-#define CONFIG_IPADDR			192.168.1.120
-#define CONFIG_SERVERIP			192.168.1.101
+#define CONFIG_IPADDR			192.168.2.120
+#define CONFIG_SERVERIP			192.168.2.227
 #define CONFIG_ETHADDR			1A:2A:3A:4A:5A:6A
 #endif /* CONFIG_CMD_NET */
 
 #define CONFIG_SPL /* add by zjh */
 
 /* add by zjh */
+#if 0
 #define CONFIG_LCD
 #define CONFIG_S5PV210_LCD
 #define LCD_BPP					LCD_COLOR24
 #define CONFIG_SPLASH_SCREEN
 #define CONFIG_CMD_BMP
 #define CONFIG_BMP_32BPP
+#endif
 #endif	/* __CONFIG_H */

@@ -16,8 +16,20 @@ spl:
 		-> copy_bl2_to_ram	/* 拷贝BL2到DDR */
 		-> 跳转到DDR的起始地址执行BL2
 
+uboot:
+/arch/arm/cpu/armv7/start.S:reset
+	->save_boot_params	//保存启动参数
+	->关 FIQ and IRQ 中断,转到 svc 模式
+	-> cpu_init_cp15	//操作cp15协处理器,关mmu cache之类操作
+	-> cpu_init_crit	//跳到board/samsung/smart210/lowlevel_init.S:lowlevel_init 这里不作为,直接返回
+	->_main		//跳到arch/arm/lib/crt0.S
+		->为global_data留空间,把global_data始地址给r9寄存器,把栈设在
+		->board_init_f	//执行板子板子的基本初始化,搜集板子的global_data信息
+		->重定位操作
+		->board_ init_r	//更高级别的初始化任务,不再返回
 
-/*************************** 配置 spl: **********************************/
+
+/*************************** 配置 spl: 成功 **********************************/
 
 顶层目录下的 boards.cfg 中添加自己的单板的硬件配置信息,仿照 smdkc100:
 Active arm armv7 s5pc1xx samsung smart210 smart210 - kingders <418128064@qq.com>
@@ -225,6 +237,313 @@ sudo dd bs=512 iflag=dsync oflag=dsync if=spl/smart210-spl.bin of=/dev/sdb seek=
 //印象中dd命令是 把if路径的文件的内容,写入到of路径文件的 第seek块始的位置
 sudo dd bs=512 iflag=dsync oflag=dsync if=/tftpboot/lcd.bin of=/dev/sdb seek=32		//放入测试文件,成功!!
 //注意这个测试文件只能串口成功,lcd并没有点亮,由于lcd为源的友善一线触摸屏设备
+
+
+/******************************** uboot 内存布局 重定位 global_data 成功 *****************************************/
+
+内村布局主要从crt0.s的_main开始:
+先把栈设置到内存最高地址
+栈八字节对齐.
+栈前移一段地址,留出一块GD_SIZE大小空间给 global_data	
+	//GD_SIZE 在 u-boot-2014.04/include/generated/generic-asm-offsets.h 中定义,其值为 168
+栈八字节对齐
+把现时的栈地址给r9,这个地址就是global_data的基地址
+然后board_init_f,各种初始化和初始化化global_data
+	->首先定义了几个重要的变量:add 最终为重定位地址,
+				addr_sp 为最终的用户栈指针地址。
+	->初始化gd(global_data)内容
+		->gd->mon_len = (ulong)&__bss_end - (ulong)_start;	//这里计算了uboot大小并存到mon_len
+	->依次调用数组 init_sequence 中的每个函数,进行一系列初始化操作	//这里就是用到绝对寻址方式
+	->最后重新布局了重定位后内存空间分布
+然后返回到_main开始重定位:
+	ldr	sp, [r9, #GD_START_ADDR_SP]	/* sp = gd->start_addr_sp */
+	bic	sp, sp, #7	/* 8-byte alignment for ABI compliance */
+	ldr	r9, [r9, #GD_BD]		/* r9 = gd->bd */
+	sub	r9, r9, #GD_SIZE		/* new GD is below bd */
+
+	adr	lr, here
+	ldr	r0, [r9, #GD_RELOC_OFF]		/* r0 = gd->reloc_off 主意reloc_off是现定位和重定位后的相对位置值*/
+	add	lr, lr, r0
+	ldr	r0, [r9, #GD_RELOCADDR]		/* r0 = gd->relocaddr */
+	//标号 here 的相对地址赋值给 lr,然后将 lr 减去将要重定位的地址相对 u-boot 当前地址的偏移,
+	//结果是 lr 保存了 u-boot 重定位后的here的地址
+	b	relocate_code		//开始重定位
+	//r9 即 gd,其中 GD_START_ADDR_SP、GD_BD、GD_SIZE、GD_RELOC_OFF 和 GD_RELOCADDR 
+	//均在 u-boot-2014.04/include/generated/generic-asm-offsets.h 中定义
+	//重定位过程还包括修改修正表(fixup tables)内容,使得重定位后也可以使用绝对寻址的方式运行一些函数
+然后回到_main的重定位后的here,清零重定位后uboot的bss段
+然后跳入board_init_r,至此内存布局内容已全部完成
+
+
+uboot会把global_data结构变量的地址放在r9里,arch/arm/include/asm/global_data.h可见:
+#define DECLARE_GLOBAL_DATA_PTR		register volatile gd_t *gd asm ("r9")
+
+
+
+u-boot 为了生成位置无关码,在链接时指定了-pie 选项,这个选项在 arch/arm/config.mk 中指定:
+# needed for relocation
+LDFLAGS_u-boot += -pie
+当使用-pie 选项后,链接器会生成一个修正表(fixup tables),在最终的二进制文件 u-boot.bin 中表现为多了 2 个段 .rel.dyn 和 .dynsym,
+还需要在链接脚本文件中增加这 2 个段
+u-boot 可以根据这 2 个段的信息
+将重定位后的代码的链接地址修正为其运行地址,这样 u-boot 就可以重定位到任何地址。
+然而在uboot自身重定位前,还是得要先在指定的位置执行!!
+smart210.h以下宏说明了uboot一就开始要在Dram地址0x20000000执行,不然在一些需要绝对寻址的地方直接跑偏,
+#define CONFIG_SYS_TEXT_BASE		0x20000000	/* modied by zjh */
+误删前对重定位的分析非常详细,现在也只能挑重点说,日后再有机会补充
+
+
+///////////////////关于终端显示
+修改;include/configs/smart210.h
+#define CONFIG_SYS_PROMPT		"SMART210 # "	//uboot 命令终端的显示标识
+#define CONFIG_IDENT_STRING		" for SMART210"	//识别符,不知哪的
+
+board/samsung/smdkv210/smdkv210.c 中的 checkboard 函数,修改为:
+printf("Board:\tSMART210\n");
+
+
+///////////////////内存布局过程中,要知道的smart210内存结构
+修改;include/configs/smart210.h
+/* SMART210 的内存结构内容 */
+#define CONFIG_NR_DRAM_BANKS	1		//只有一块banks
+#define PHYS_SDRAM_1		CONFIG_SYS_SDRAM_BASE	/* SDRAM Bank #1 dram从地址0x20000000开始*/
+#define PHYS_SDRAM_1_SIZE	(512 << 20)	/* 0x20000000, 512 MB Bank #1 (modied by zjh) */
+
+
+///////////////////关于终端的串口设置,我们用串口0
+修改;include/configs/smart210.h
+#define CONFIG_SERIAL0			1	/* use SERIAL 0 on SMDKC100 */
+
+board/samsung/smdkv210/lowlevel_init.S 中添加代码
+/* add by zjh */
+ldr	r0, =0xE0200000		/* GPA0_CON */
+ldr	r1, =0x22222222
+str	r1, [r0]
+
+///////////////////打印正确的cpu信息
+arch/arm/cpu/armv7/s5p-common/cpu_info.c
+int print_cpuinfo(void)
+{......
+	printf("CPU:\t%sV210@%sMHz\n", s5p_get_cpu_name(), strmhz(buf, get_arm_clk()));
+
+arch/arm/cpu/armv7/s5pc1xx/clock.c
+unsigned long get_arm_clk(void)
+{
+	/* modied by zjh */
+	return s5pv210_get_arm_clk();
+)
+/* s5pv210: return ARM clock frequency (add by zjh) */
+static unsigned long s5pv210_get_arm_clk(void)
+{
+	struct s5pv210_clock *clk =
+		(struct s5pv210_clock *)samsung_get_base_clock();
+	unsigned long div;
+	unsigned long dout_apll, armclk;
+	unsigned int apll_ratio;
+
+	div = readl(&clk->div0);
+
+	/* APLL_RATIO: [2:0] */
+	apll_ratio = div & 0x7;
+
+	dout_apll = get_pll_clk(APLL) / (apll_ratio + 1);
+	armclk = dout_apll;
+
+	return armclk;
+}
+unsigned long get_pll_clk(int pllreg)
+{
+	return s5pv210_get_pll_clk(pllreg);
+}
+/* s5pv210: return pll clock frequency(add by zjh) */
+static unsigned long s5pv210_get_pll_clk(int pllreg)
+{
+	struct s5pv210_clock *clk =
+		(struct s5pv210_clock *)samsung_get_base_clock();
+	unsigned long r, m, p, s, mask, fout;
+	unsigned int freq;
+
+	switch (pllreg) {
+	case APLL:
+		r = readl(&clk->apll_con0);
+		break;
+	case MPLL:
+		r = readl(&clk->mpll_con);
+		break;
+	case EPLL:
+		r = readl(&clk->epll_con0);
+		break;
+	case VPLL:
+		r = readl(&clk->vpll_con);
+		break;
+	default:
+		printf("Unsupported PLL (%d)\n", pllreg);
+		return 0;
+	}
+
+	/*
+	 * APLL_CON0: MIDV [25:16]
+	 * MPLL_CON:  MIDV [25:16]
+	 * EPLL_CON0: MIDV [24:16]
+	 * VPLL_CON:  MIDV [24:16]
+	 */
+	if (pllreg == APLL || pllreg == MPLL)
+		mask = 0x3ff;
+	else
+		mask = 0x1ff;
+
+	m = (r >> 16) & mask;
+
+	/* PDIV [13:8] */
+	p = (r >> 8) & 0x3f;
+	/* SDIV [2:0] */
+	s = r & 0x7;
+
+	freq = CONFIG_SYS_CLK_FREQ_V210;
+	if (pllreg == APLL) {
+		if (s < 1)
+			s = 1;
+		/* FOUT = MDIV * FIN / (PDIV * 2^(SDIV - 1)) */
+		fout = m * (freq / (p * (1 << (s - 1))));
+	} else
+		/* FOUT = MDIV * FIN / (PDIV * 2^SDIV) */
+		fout = m * (freq / (p * (1 << s)));
+
+	return fout;
+}
+
+编译后烧写uboot
+sudo dd bs=512 iflag=dsync oflag=dsync if=u-boot.bin of=/dev/sdb seek=32
+
+
+
+/******************************** uboot 命令补全 *****************************************/
+
+修改;include/configs/smart210.h
+#define CONFIG_CMDLINE_EDITING	/* add by zjh */
+#define CONFIG_AUTO_COMPLETE	/* add by zjh */
+
+编译安装后便可以
+现在可以按 Tab 键自动补全命令了,同时可以按上下键查看历史命令。
+
+
+/******************************** 移植网卡 DM9000 *****************************************/
+注意,我们的网卡的中断针口接的是XEINT7!!! 不过貌似uboot移植用不着
+
+关于SROM控制器的说明也因为误删而丢失了,不过,重点记住
+s5pv210 SROM 有6个板块(bank),每块映射的空间有128mb,然而只提供16针供地址使用,
+当读写srom 对应的地址A时,srom控制器会自动输出片选信号,选出对应板块,以及与地址一致的16针地址信号,
+然而16针地址信号只能与地址A的低16位一致,也就说只能用到128m里的低位的6.4mb,
+而其他映射的地址会因为,低16位一致,而重复映射,
+所以SROM 接入的不应该是大容量的储存芯片,而是一些功能类芯片.
+还有偏选,读或写操作都是硬件自己操作,用户直接读写对应地址即可,即例如
+	a = *((*int)0x8800234) //读操作
+	*((*int)0x8800234) = b //写操作
+
+DM9000A 有 2 个端口:DATA 和 INDEX(即地址)。DM9000A 的地址和数据线复用,由cmd针选择data线读写的是dm9000芯片里的地址还是数据
+
+这里dm9000A 接入bank1,地址针2 接到cmd 
+所以我们读写 s5pv210 的介于地址 0x88000000~0x8FFFFFFF 的地址时,只要地址2位是0时,dm9000便处于地址态
+否则我们读写 s5pv210 的介于地址 0x88000000~0x8FFFFFFF 的地址时,只要地址2位是1时,dm9000便处于数据态
+
+接口:
+Xm0DATA[15:0]		SD[15:0]
+Xm0ADDR2		CMD
+XEINT7			INT
+Xm0OEn			IOR#
+Xm0WEn			IOW#
+Xm0CSn1			CS#
+XnRSTOUT		PWRST#
+			X1,X2 (接25mhz晶振)
+
+时序:
+Tacs:地址发出后等多长时间发片选,DM9000A 中 CS 和 CMD(地址)同时发出,所以 Tacs=0ns
+Tcos:发出片选信号后等多长时间发出读使能信号(nOW、IOR),在 DM9000A 的时序图上对应 T1,最小为 0,我们稍微设置大点 Tcos=5ns
+Tacc:读使能信号持续时间,在 DM9000A 的时序图上对应 T2,我们设置为设置 Tacc=15ns
+Tcoh:读使能信号结束后,片选信号保持时间,在 DM9000A 的时序图中对应 T5,所以可以设置
+Tcoh=5ns
+Tcah:片选结束后,地址保存时间,DM9000A 中片选和地址同时结束,所以 Tcah=0
+Tacp:页模式,不管
+PMC:页模式,不管
+
+/////////////////配置
+include/config_cmd_default.h
+#define CONFIG_CMD_NET		/* bootp, tftpboot, rarpboot 启动网络,初始化dm9000要这个宏*/
+
+include/configs/smart210.h
+#include <config_cmd_default.h>
+#ifdef CONFIG_CMD_NET
+/* masked by zjh */
+#if 0
+#define CONFIG_SMC911X         1       /* we have a SMC9115 on-board   */
+#define CONFIG_SMC911X_16_BIT  1       /* SMC911X_16_BIT Mode          */
+#define CONFIG_SMC911X_BASE    0x98800300      /* SMC911X Drive Base   */
+#endif
+/* modied by zjh */
+#define CONFIG_ENV_SROM_BANK   1       /* Select SROM Bank-1 for Ethernet*/
+/* add by zjh */
+#define CONFIG_DRIVER_DM9000
+#define CONFIG_DM9000_NO_SROM
+#define CONFIG_DM9000_BASE		0x88000000
+#define DM9000_IO				(CONFIG_DM9000_BASE)
+#define DM9000_DATA				(CONFIG_DM9000_BASE + 0x4)
+#define CONFIG_CMD_PING
+#define CONFIG_IPADDR			192.168.2.120
+#define CONFIG_SERVERIP			192.168.2.227		//后来tftp的服务器地址
+#define CONFIG_ETHADDR			1A:2A:3A:4A:5A:6A
+#endif /* CONFIG_CMD_NET */
+
+dm9000初始化有两个步骤:
+先是初始化控制dm9000得 srom 控制器
+board.c 中的 board_init_r	
+	->board_init();	
+		->board_init //在 board/samsung/smdkv210/smart210.c
+			->dm9000_pre_init(void) 在 board/samsung/smdkv210/smart210.c	//初始化 srom 控制器
+			//就是初始化srom与外接芯片的时序问题
+然后通过srom初始化dm9000
+board.c 中的 board_init_r	
+	->eth_initialize //函数在 u-boot-2014.04/net/eth.c
+		->board_eth_init //在 u-boot-2014.04/board/samsung/smdkv210/smart210.c	初始化ethernet 
+			->dm9000_initialize //在 drivers/net/DM9000Ax.c
+
+
+
+board/samsung/smdkv210/smart210.c
+屏蔽smc9115_pre_init
+static void dm9000_pre_init(void)
+{
+	u32 smc_bw_conf, smc_bc_conf;
+	
+	/* Ethernet needs bus width of 16 bits */
+	smc_bw_conf = SMC_DATA16_WIDTH(CONFIG_ENV_SROM_BANK)
+		| SMC_BYTE_ADDR_MODE(CONFIG_ENV_SROM_BANK);
+	smc_bc_conf = SMC_BC_TACS(0) | SMC_BC_TCOS(1) | SMC_BC_TACC(2)
+		| SMC_BC_TCOH(1) | SMC_BC_TAH(0) | SMC_BC_TACP(0) | SMC_BC_PMC(0);
+
+	/* Select and configure the SROMC bank */
+	s5p_config_sromc(CONFIG_ENV_SROM_BANK, smc_bw_conf, smc_bc_conf);
+}
+int board_init(void)
+{
+	/* masked by zjh */
+	//smc9115_pre_init();
+	dm9000_pre_init();
+	gd->bd->bi_arch_number = MACH_TYPE_SMDKC100;
+	gd->bd->bi_boot_params = PHYS_SDRAM_1 + 0x100;
+
+	return 0;
+}
+int board_eth_init(bd_t *bis)
+{
+	int rc = 0;
+#ifdef CONFIG_SMC911X
+	rc = smc911x_initialize(0, CONFIG_SMC911X_BASE);
+	/* add by zjh */
+#elif defined(CONFIG_DRIVER_DM9000)
+	rc = dm9000_initialize(bis);
+#endif
+	return rc;
+}
 
 
 

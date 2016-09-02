@@ -22,74 +22,24 @@
 #define CONFIG_SYS_CLK_FREQ_C110	24000000
 #endif
 
-/* s5pc110: return pll clock frequency */
-static unsigned long s5pc100_get_pll_clk(int pllreg)
+
+/* s5pv210: return pll clock frequency(add by zjh) */
+static unsigned long s5pv210_get_pll_clk(int pllreg)
 {
-	struct s5pc100_clock *clk =
-		(struct s5pc100_clock *)samsung_get_base_clock();
+	struct s5pv210_clock *clk =
+		(struct s5pv210_clock *)samsung_get_base_clock();
 	unsigned long r, m, p, s, mask, fout;
 	unsigned int freq;
 
 	switch (pllreg) {
 	case APLL:
-		r = readl(&clk->apll_con);
+		r = readl(&clk->apll_con0);
 		break;
 	case MPLL:
 		r = readl(&clk->mpll_con);
 		break;
 	case EPLL:
-		r = readl(&clk->epll_con);
-		break;
-	case HPLL:
-		r = readl(&clk->hpll_con);
-		break;
-	default:
-		printf("Unsupported PLL (%d)\n", pllreg);
-		return 0;
-	}
-
-	/*
-	 * APLL_CON: MIDV [25:16]
-	 * MPLL_CON: MIDV [23:16]
-	 * EPLL_CON: MIDV [23:16]
-	 * HPLL_CON: MIDV [23:16]
-	 */
-	if (pllreg == APLL)
-		mask = 0x3ff;
-	else
-		mask = 0x0ff;
-
-	m = (r >> 16) & mask;
-
-	/* PDIV [13:8] */
-	p = (r >> 8) & 0x3f;
-	/* SDIV [2:0] */
-	s = r & 0x7;
-
-	/* FOUT = MDIV * FIN / (PDIV * 2^SDIV) */
-	freq = CONFIG_SYS_CLK_FREQ_C100;
-	fout = m * (freq / (p * (1 << s)));
-
-	return fout;
-}
-
-/* s5pc100: return pll clock frequency */
-static unsigned long s5pc110_get_pll_clk(int pllreg)
-{
-	struct s5pc110_clock *clk =
-		(struct s5pc110_clock *)samsung_get_base_clock();
-	unsigned long r, m, p, s, mask, fout;
-	unsigned int freq;
-
-	switch (pllreg) {
-	case APLL:
-		r = readl(&clk->apll_con);
-		break;
-	case MPLL:
-		r = readl(&clk->mpll_con);
-		break;
-	case EPLL:
-		r = readl(&clk->epll_con);
+		r = readl(&clk->epll_con0);
 		break;
 	case VPLL:
 		r = readl(&clk->vpll_con);
@@ -100,10 +50,10 @@ static unsigned long s5pc110_get_pll_clk(int pllreg)
 	}
 
 	/*
-	 * APLL_CON: MIDV [25:16]
-	 * MPLL_CON: MIDV [25:16]
-	 * EPLL_CON: MIDV [24:16]
-	 * VPLL_CON: MIDV [24:16]
+	 * APLL_CON0: MIDV [25:16]
+	 * MPLL_CON:  MIDV [25:16]
+	 * EPLL_CON0: MIDV [24:16]
+	 * VPLL_CON:  MIDV [24:16]
 	 */
 	if (pllreg == APLL || pllreg == MPLL)
 		mask = 0x3ff;
@@ -117,7 +67,7 @@ static unsigned long s5pc110_get_pll_clk(int pllreg)
 	/* SDIV [2:0] */
 	s = r & 0x7;
 
-	freq = CONFIG_SYS_CLK_FREQ_C110;
+	freq = CONFIG_SYS_CLK_FREQ_V210;
 	if (pllreg == APLL) {
 		if (s < 1)
 			s = 1;
@@ -130,11 +80,11 @@ static unsigned long s5pc110_get_pll_clk(int pllreg)
 	return fout;
 }
 
-/* s5pc110: return ARM clock frequency */
-static unsigned long s5pc110_get_arm_clk(void)
+/* s5pv210: return ARM clock frequency (add by zjh) */
+static unsigned long s5pv210_get_arm_clk(void)
 {
-	struct s5pc110_clock *clk =
-		(struct s5pc110_clock *)samsung_get_base_clock();
+	struct s5pv210_clock *clk =
+		(struct s5pv210_clock *)samsung_get_base_clock();
 	unsigned long div;
 	unsigned long dout_apll, armclk;
 	unsigned int apll_ratio;
@@ -146,28 +96,6 @@ static unsigned long s5pc110_get_arm_clk(void)
 
 	dout_apll = get_pll_clk(APLL) / (apll_ratio + 1);
 	armclk = dout_apll;
-
-	return armclk;
-}
-
-/* s5pc100: return ARM clock frequency */
-static unsigned long s5pc100_get_arm_clk(void)
-{
-	struct s5pc100_clock *clk =
-		(struct s5pc100_clock *)samsung_get_base_clock();
-	unsigned long div;
-	unsigned long dout_apll, armclk;
-	unsigned int apll_ratio, arm_ratio;
-
-	div = readl(&clk->div0);
-
-	/* ARM_RATIO: [6:4] */
-	arm_ratio = (div >> 4) & 0x7;
-	/* APLL_RATIO: [0] */
-	apll_ratio = div & 0x1;
-
-	dout_apll = get_pll_clk(APLL) / (apll_ratio + 1);
-	armclk = dout_apll / (arm_ratio + 1);
 
 	return armclk;
 }
@@ -297,18 +225,13 @@ static unsigned long s5pc1xx_get_pwm_clk(void)
 
 unsigned long get_pll_clk(int pllreg)
 {
-	if (cpu_is_s5pc110())
-		return s5pc110_get_pll_clk(pllreg);
-	else
-		return s5pc100_get_pll_clk(pllreg);
+	return s5pv210_get_pll_clk(pllreg);
 }
 
 unsigned long get_arm_clk(void)
 {
-	if (cpu_is_s5pc110())
-		return s5pc110_get_arm_clk();
-	else
-		return s5pc100_get_arm_clk();
+	/* modied by zjh */
+	return s5pv210_get_arm_clk();
 }
 
 unsigned long get_pwm_clk(void)

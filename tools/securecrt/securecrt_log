@@ -1,0 +1,15 @@
+securecrt 安装
+sudo dpkg -i scrt-7.3.0-657.ubuntu13-64.x86_64.deb
+破解：
+sudo perl securecrt_linux_crack.pl /usr/bin/SecureCRT	//例如得到log
+License:
+
+	Name:		xxxx
+	Company:	www.boll.me
+	Serial Number:	03-15-097355
+	License Key:	xxx 9RKAWY 6WP69G 8EQ1JB ABCM3D K4E85M D3WG57 RGFWT2
+	Issue Date:	08-16-2015
+
+sudo SecureCRT
+然后填入以上破解消息
+

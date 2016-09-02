@@ -337,8 +337,6 @@ void lcd_sync(void);
 #define LCD_COLOR4	2
 #define LCD_COLOR8	3
 #define LCD_COLOR16	4
-/* add by zjh */
-#define LCD_COLOR24 5
 
 /*----------------------------------------------------------------------*/
 #if defined(CONFIG_LCD_INFO_BELOW_LOGO)

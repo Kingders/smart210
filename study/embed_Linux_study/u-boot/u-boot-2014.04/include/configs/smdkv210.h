@@ -68,11 +68,6 @@
 
 #define CONFIG_CMDLINE_EDITING	/* add by zjh */
 #define CONFIG_AUTO_COMPLETE	/* add by zjh */
-/* add by zjh, for bootmenu */
-#define CONFIG_CMD_BOOTMENU
-#define CONFIG_MENU
-#define CONFIG_AUTOBOOT_KEYED
-#define CONFIG_MENU_SHOW
 
 #undef CONFIG_CMD_FLASH
 #undef CONFIG_CMD_IMLS
@@ -108,8 +103,7 @@
 #define MTDIDS_DEFAULT		"nand0=s5p-nand"
 #define MTDPARTS_DEFAULT	"mtdparts=s5p-nand:256k(bootloader)"\
 				",128k@0x40000(params)"\
-				",2m@0x60000(log)"\
-				",3m@0x260000(kernel)"\
+				",3m@0x60000(kernel)"\
 				",-(rootfs)"
 
 #define NORMAL_MTDPARTS_DEFAULT MTDPARTS_DEFAULT
@@ -130,13 +124,48 @@
 #define CONFIG_UPDATEB	"updateb=onenand erase 0x0 0x40000;" \
 			" onenand write 0x32008000 0x0 0x40000\0"
 
-
-
 #define CONFIG_ENV_OVERWRITE
-/* modied by zjh */
 #define CONFIG_EXTRA_ENV_SETTINGS					\
-	"splashimage=0x23000000" \
-
+	CONFIG_UPDATEB \
+	"updatek=" \
+		"onenand erase 0x60000 0x300000;" \
+		"onenand write 0x31008000 0x60000 0x300000\0" \
+	"updateu=" \
+		"onenand erase block 147-4095;" \
+		"onenand write 0x32000000 0x1260000 0x8C0000\0" \
+	"bootk=" \
+		"onenand read 0x30007FC0 0x60000 0x300000;" \
+		"bootm 0x30007FC0\0" \
+	"flashboot=" \
+		"set bootargs root=/dev/mtdblock${bootblock} " \
+		"rootfstype=${rootfstype} " \
+		"ubi.mtd=${ubiblock} ${opts} " CONFIG_COMMON_BOOT ";" \
+		"run bootk\0" \
+	"ubifsboot=" \
+		"set bootargs root=ubi0!rootfs rootfstype=ubifs " \
+		" ubi.mtd=${ubiblock} ${opts} " CONFIG_COMMON_BOOT "; " \
+		"run bootk\0" \
+	"boottrace=setenv opts initcall_debug; run bootcmd\0" \
+	"android=" \
+		"set bootargs root=ubi0!ramdisk ubi.mtd=${ubiblock} " \
+		"rootfstype=ubifs init=/init.sh " CONFIG_COMMON_BOOT "; " \
+		"run bootk\0" \
+	"nfsboot=" \
+		"set bootargs root=/dev/nfs ubi.mtd=${ubiblock} " \
+		"nfsroot=${nfsroot},nolock " \
+		"ip=${ipaddr}:${serverip}:${gatewayip}:" \
+		"${netmask}:nowplus:usb0:off " CONFIG_COMMON_BOOT "; " \
+		"run bootk\0" \
+	"ramboot=" \
+		"set bootargs " CONFIG_RAMDISK_BOOT \
+		" initrd=0x33000000,8M ramdisk=8192\0" \
+	"rootfstype=cramfs\0" \
+	"mtdparts=" MTDPARTS_DEFAULT "\0" \
+	"meminfo=mem=128M\0" \
+	"nfsroot=/nfsroot/arm\0" \
+	"bootblock=5\0" \
+	"ubiblock=4\0" \
+	"ubi=enabled"
 
 /*
  * Miscellaneous configurable options
@@ -226,11 +255,4 @@
 
 #define CONFIG_SPL /* add by zjh */
 
-/* add by zjh */
-#define CONFIG_LCD
-#define CONFIG_S5PV210_LCD
-#define LCD_BPP					LCD_COLOR24
-#define CONFIG_SPLASH_SCREEN
-#define CONFIG_CMD_BMP
-#define CONFIG_BMP_32BPP
 #endif	/* __CONFIG_H */

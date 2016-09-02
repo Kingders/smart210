@@ -100,8 +100,7 @@
 #if LCD_BPP == LCD_MONOCHROME
 # define COLOR_MASK(c)		((c)	  | (c) << 1 | (c) << 2 | (c) << 3 | \
 				 (c) << 4 | (c) << 5 | (c) << 6 | (c) << 7)
-/* modied by zjh */
-#elif (LCD_BPP == LCD_COLOR8) || (LCD_BPP == LCD_COLOR16) || (LCD_BPP == LCD_COLOR24)
+#elif (LCD_BPP == LCD_COLOR8) || (LCD_BPP == LCD_COLOR16)
 # define COLOR_MASK(c)		(c)
 #else
 # error Unsupported LCD BPP.
@@ -306,9 +305,6 @@ static void lcd_drawchars(ushort x, ushort y, uchar *str, int count)
 		int i;
 #if LCD_BPP == LCD_COLOR16
 		ushort *d = (ushort *)dest;
-/* add by zjh */
-#elif LCD_BPP == LCD_COLOR24
-		uint *d = (uint *)dest;
 #else
 		uchar *d = dest;
 #endif
@@ -336,13 +332,6 @@ static void lcd_drawchars(ushort x, ushort y, uchar *str, int count)
 				bits <<= 1;
 			}
 #elif LCD_BPP == LCD_COLOR16
-			for (c = 0; c < 8; ++c) {
-				*d++ = (bits & 0x80) ?
-						lcd_color_fg : lcd_color_bg;
-				bits <<= 1;
-			}
-/* add by zjh */			
-#elif	LCD_BPP == LCD_COLOR24
 			for (c = 0; c < 8; ++c) {
 				*d++ = (bits & 0x80) ?
 						lcd_color_fg : lcd_color_bg;

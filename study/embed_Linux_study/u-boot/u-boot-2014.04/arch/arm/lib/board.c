@@ -615,7 +615,7 @@ void board_init_r(gd_t *id, ulong dest_addr)
 		env_relocate();
 	else
 		set_default_env(NULL);
-	
+
 #if defined(CONFIG_CMD_PCI) || defined(CONFIG_PCI)
 	arm_pci_init();
 #endif

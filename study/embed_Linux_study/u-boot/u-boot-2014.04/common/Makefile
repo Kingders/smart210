@@ -15,6 +15,7 @@ obj-$(CONFIG_SYS_HUSH_PARSER) += hush.o
 obj-y += s_record.o
 obj-y += xyzModem.o
 obj-y += cmd_disk.o
+
 # boards
 obj-$(CONFIG_SYS_GENERIC_BOARD) += board_f.o
 obj-$(CONFIG_SYS_GENERIC_BOARD) += board_r.o

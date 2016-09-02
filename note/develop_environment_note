@@ -1,3 +1,23 @@
+数据恢复,一不小心,把重要文件夹删掉了,
+马上关机!!
+取出硬盘,挂到另外的ubuntu 14.04 的机子
+date -d "2016-08-31 13:00:00" +%s	//算出删错文件时的提前一点的时间,例如得 1472619600
+
+fdisk -l 查看挂载的分区设备文件 假如/dev/sdb3
+extundelete /dev/sdb3 --after 1472619600 --restore-all		//回复所有删掉的文件
+extundelete /dev/sdb3 --after 1472619600 --restore-file /home/kingders/c.bin	//回复所有指定文件,如果知道前文件路径
+extundelete /dev/sdb3 --after 1472619600 --restore-directory /home/kingders/temp	//回复所有指定文件夹,如果知道前文件夹路径
+当xxx文件夹放入垃圾箱并清空了垃圾箱,那么要回复的路径为: /home/kingders/.local/share/Trash/files/xxx
+
+
+
+
+
+
+
+
+
+
 /********************************* git ***************************************/
 我的github帐号：
 nane: kingders
@@ -269,6 +289,19 @@ http://www.liaoxuefeng.com/wiki/0013739516305929606dd18361248578c67b8067c8c017b0
 git add -A	//把所有修改了的文件和新建的文件的痕迹加入暂存区,相当于全员备份
 git commit -m "xxx"	//提交
 git push origin master	//提交远程库
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -572,6 +572,430 @@ int dm9000_initialize(bd_t *bis)
 
 
 
+/******************************** nand 成功 *****************************************/
+
+s5pv210 通过nand硬件模块操作外部nand储存芯片
+注意nandflash里的地址与s5pv210芯片的地址是不一样的,是相互独立的,nandflash地址并不映射到s5pv210的地址上去
+
+include/configs/smart210.h
+#undef CONFIG_CMD_NAND		//表示要使用nand与nand命令 相当于是否使用nand的总开关
+#define CONFIG_SYS_MAX_NAND_DEVICE 	1		//只有一块nandflash储存芯片
+#define CONFIG_SYS_NAND_BASE		0xB0E00000	//nand控制模块的寄存器基地址
+#define CONFIG_NAND_S5PV210				//s5pv210的nand操作及初始化函数函数
+/* add by zjh */
+#define CONFIG_ENV_IS_IN_NAND		//注意环境变量与之前说的golbal_data不一样,
+					//环境变量即是linux使用的参数(params),uboot启动时也会默认从nandflash读取,以被修改
+					//假如读取失败会默认使用系统定义的某些宏为环境变量
+					//global_data是uboot自身内部初始化和操作是使用的
+					//环境变量将存在naandflash里
+#define CONFIG_ENV_SIZE			(128 << 10)	/* 128KiB, 0x20000 */
+#define CONFIG_ENV_ADDR			(256 << 10)	/* 256KiB, 0x40000 这时nanflash里的地址*/
+#define CONFIG_ENV_OFFSET		(256 << 10)	/* 256KiB, 0x40000 */
+
+common/Makefile
+obj-$(CONFIG_ENV_IS_IN_NAND) += env_nand.o
+
+drivers/mtd/nand/Makefile
+obj-$(CONFIG_NAND_S5PV210) += s5pv210_nand.o
+
+arch/arm/include/asm/arch-s5pc1xx/cpu.h
+#define S5PV210_NAND_BASE	0xB0E00000
+SAMSUNG_BASE(nand, NAND_BASE)
+
+arch/arm/include/asm/arch-s5pc1xx/nand_reg.h
+struct s5pv210_nand {
+	u32	nfconf;
+	u32	nfcont;
+	u32	nfcmmd;
+	u32	nfaddr;
+	u32	nfdata;
+	u32	nfmeccd0;
+	u32	nfmeccd1;
+	u32	nfseccd;
+	u32 nfsblk;
+	u32 nfeblk;
+	u32	nfstat;
+	u32 nfeccerr0;
+	u32 nfeccerr1;
+	u32 nfmecc0;
+	u32 nfmecc1;
+	u32 nfsecc;
+	u32 nfmlcbitpt;
+	u8 res0[0x1ffbc];
+	u32 nfeccconf;
+	u8 res1[0x1c];
+	u32 nfecccont;
+	u8 res2[0xc];
+	u32 nfeccstat;
+	u8 res3[0xc];
+	u32 nfeccsecstat;
+	u8 res4[0x4c];
+	u32 nfeccprgecc0;
+	u32 nfeccprgecc1;
+	u32 nfeccprgecc2;
+	u32 nfeccprgecc3;
+	u32 nfeccprgecc4;
+	u32 nfeccprgecc5;
+	u32 nfeccprgecc6;
+	u8 res5[0x14];
+	u32 nfeccerl0;
+	u32 nfeccerl1;
+	u32 nfeccerl2;
+	u32 nfeccerl3;
+	u32 nfeccerl4;
+	u32 nfeccerl5;
+	u32 nfeccerl6;
+	u32 nfeccerl7;
+	u8 res6[0x10];
+	u32 nfeccerp0;
+	u32 nfeccerp1;
+	u32 nfeccerp2;
+	u32 nfeccerp3;
+	u8 res7[0x10];
+	u32 nfeccconecc0;
+	u32 nfeccconecc1;
+	u32 nfeccconecc2;
+	u32 nfeccconecc3;
+	u32 nfeccconecc4;
+	u32 nfeccconecc5;
+	u32 nfeccconecc6;
+};
+
+添加 drivers/mtd/nand/s5pv210_nand.c	//详细内容见文件
+#include <asm/arch/nand_reg.h>		//要使用nand_reg.h里的寄存器结构
+
+调试:
+编译后储存下环境变量试试
+setenv bootargs = "console=ttyPS0,115200n8 root=/dev/nfs rw nfsroot=192.168.0.210:/nfsboot/rootfs ip=192.168.0.230:192.168.0.210:192.168.0.1:255.255.255.0::eth0:off";
+分别解释如下：
+console ：指定控制台的设备以及波特率
+root=/dev/nfs：制定/dev/nfs设备为根文件系统
+rw: rw参数表示内核以读写方式加载根文件系统。
+ ro参数表示内核以只读方式加载根文件系统，以便进行文件系统完整性检查，比如运行fsck；
+nfsroot=192.168.0.210:/nfsboot/rootfs：nfs根文件系统的目录：192.168.0.210服务器上的/nfsboot/rootfs目录
+ip=192.168.0.230:192.168.0.210:192.168.0.1:255.255.255.0::eth0:off";：ip的值为：开发板IP：主机服务器IP：网关：子网掩码：开发板用到的网卡：不使用自动配置
+saveenv
+关机后重启,发现之前设置的bootargs在
+
+
+/******************************** nand 分区 *****************************************/
+
+uboot关于分区的设置:
+
+include/configs/smart210.h
+#define CONFIG_MTD_DEVICE
+#define CONFIG_MTD_PARTITIONS
+/* modied by zjh */
+#define MTDIDS_DEFAULT		"nand0=s5p-nand"
+#define MTDPARTS_DEFAULT	"mtdparts=s5p-nand:256k(bootloader)"\
+				",128k@0x40000(params)"\
+				",2m@0x60000(log)"\
+				",3m@0x260000(kernel)"\
+				",-(rootfs)"
+mtdparts default	//命令会按MTDPARTS_DEFAULT分区
+saveenv
+mtdparts	//查看分区
+
+
+/******************************** nand ecc 成功 *****************************************/
+
+smart210 接的 nand flash 是slc架构,页大小2kb,然而只是页的主区域(main area),然而每个页还有额外的 64 bytes 的spare area 用来储存ecc码
+
+所谓8bit ecc:
+当启用ecc时
+经对相关寄存器设定,s5pv210每向nandflash进行页读写2kb内容时,每读写 512 bytes时会生成 13个 8位ecc码.
+页写操作时,会把最后生成的共 52个8bit ecc码存到对应的寄存器,然后用户把他们 写到页的spare area 对应位置 (也称为 ENCODING )
+spare area 又叫 OOD区,ood区前12bytes另作用途,52个ecc码放到ood的前12bytes之后的位置
+页读操作时,每读512bytes数据时,要立即转到odd区读对应的 13个8bit ecc码,而不是继续读下一个512bytes数据,  (也称为 DECODING )
+这时,芯片会自动校对数据错误,并把出错的地方生成策略存到对应的寄存器,然后再继续读下一个512bytes数据,
+累计读完一页后,我们便可以查看对应存储错误策略的寄存器,如果有错可以尝试纠正错误的数据,
+但如果错误太严重,存储错误策略的寄存器会给出无法纠错的提示.
+
+注意,还未从代码里分析出启动或者关闭ecc时,nandflash的读写操作函数具体是哪个.
+
+
+include/configs/smart210.h
+#define CONFIG_S5PV210_NAND_HWECC		//启用ecc功能
+#define	CONFIG_SYS_NAND_ECCSIZE		512	//每读写512bytes生13个8bit ecc码
+#define CONFIG_SYS_NAND_ECCBYTES	13	//13个ecc码
+
+drivers/mtd/nand/s5pv210_nand.c
+#ifdef CONFIG_S5PV210_NAND_HWECC
+	nand->ecc.hwctl = s5pv210_nand_enable_hwecc;
+	nand->ecc.calculate = s5pv210_nand_calculate_ecc;
+	nand->ecc.correct = s5pv210_nand_correct_data;
+	nand->ecc.mode = NAND_ECC_HW;
+	nand->ecc.size = CONFIG_SYS_NAND_ECCSIZE;
+	nand->ecc.bytes = CONFIG_SYS_NAND_ECCBYTES;
+	nand->ecc.strength = 1;
+	/* add by zjh */
+	nand->ecc.layout = &nand_oob_64;
+	nand->ecc.read_page = s5pv210_nand_read_page_hwecc;	//s5pv210 的 ecc 硬件读函数
+#else
+	nand->ecc.mode = NAND_ECC_SOFT;
+#endif
+/* add by zjh */
+static struct nand_ecclayout nand_oob_64 = {
+	.eccbytes = 52,		/* 2048 / 512 * 13 */
+	.eccpos = {	12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+				22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+				32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 
+				42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+				52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+				62, 63},
+	/* 0和1用于保存坏块标记，12~63保存ecc，剩余2~11为free */
+	.oobfree = {
+			{.offset = 2,
+			.length = 10}
+		}
+};
+#ifdef CONFIG_S5PV210_NAND_HWECC
+void s5pv210_nand_enable_hwecc(struct mtd_info *mtd, int mode)
+{
+	struct s5pv210_nand *nand = (struct s5pv210_nand *)samsung_get_base_nand();
+	debug("s5pv210_nand_enable_hwecc(%p, %d)\n", mtd, mode);
+	
+	writel(readl(&nand->nfconf) | (0x3 << 23), &nand->nfconf);
+	
+	if (mode == NAND_ECC_READ)
+	{
+	}
+	else if (mode == NAND_ECC_WRITE)
+	{
+		/* set 8/12/16bit Ecc direction to Encoding */
+		writel(readl(&nand->nfecccont) | (0x1 << 16), &nand->nfecccont);
+		/* clear 8/12/16bit ecc encode done */
+		writel(readl(&nand->nfeccstat) | (0x1 << 25), &nand->nfeccstat);
+	}
+	
+	/* Initialize main area ECC decoder/encoder */
+	writel(readl(&nand->nfcont) | (0x1 << 5), &nand->nfcont);
+	
+	/* The ECC message size(For 512-byte message, you should set 511)
+	* 8-bit ECC/512B */
+	writel((511 << 16) | 0x3, &nand->nfeccconf);
+	
+	writel(readl(&nand->nfstat) | (0x1 << 4) | (0x1 << 5), &nand->nfstat);
+	
+	/* Initialize main area ECC decoder/ encoder */
+	writel(readl(&nand->nfecccont) | (0x1 << 2), &nand->nfecccont);
+	
+	/* Unlock Main area ECC   */
+	writel(readl(&nand->nfcont) & ~(0x1 << 7), &nand->nfcont);
+}
+
+/* modied by zjh */
+static int s5pv210_nand_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
+				      u_char *ecc_code)
+{
+	struct s5pv210_nand *nand = (struct s5pv210_nand *)samsung_get_base_nand();
+	u32 nfeccprgecc0 = 0, nfeccprgecc1 = 0, nfeccprgecc2 = 0, nfeccprgecc3 = 0;
+
+	/* Lock Main area ECC */
+	writel(readl(&nand->nfcont) | (1 << 7), &nand->nfcont);
+	
+	/* 读取13 Byte的Ecc Code */
+	nfeccprgecc0 = readl(&nand->nfeccprgecc0);
+	nfeccprgecc1 = readl(&nand->nfeccprgecc1);
+	nfeccprgecc2 = readl(&nand->nfeccprgecc2);
+	nfeccprgecc3 = readl(&nand->nfeccprgecc3);
+
+	ecc_code[0] = nfeccprgecc0 & 0xff;
+	ecc_code[1] = (nfeccprgecc0 >> 8) & 0xff;
+	ecc_code[2] = (nfeccprgecc0 >> 16) & 0xff;
+	ecc_code[3] = (nfeccprgecc0 >> 24) & 0xff;
+	ecc_code[4] = nfeccprgecc1 & 0xff;
+	ecc_code[5] = (nfeccprgecc1 >> 8) & 0xff;
+	ecc_code[6] = (nfeccprgecc1 >> 16) & 0xff;
+	ecc_code[7] = (nfeccprgecc1 >> 24) & 0xff;
+	ecc_code[8] = nfeccprgecc2 & 0xff;
+	ecc_code[9] = (nfeccprgecc2 >> 8) & 0xff;
+	ecc_code[10] = (nfeccprgecc2 >> 16) & 0xff;
+	ecc_code[11] = (nfeccprgecc2 >> 24) & 0xff;
+	ecc_code[12] = nfeccprgecc3 & 0xff;
+	
+	debug("s5pv210_nand_calculate_hwecc(%p,):\n"
+		"0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n"
+		"0x%02x 0x%02x 0x%02x\n", mtd , ecc_code[0], ecc_code[1], ecc_code[2], 
+		ecc_code[3], ecc_code[4], ecc_code[5], ecc_code[6], ecc_code[7], 
+		ecc_code[8], ecc_code[9], ecc_code[10], ecc_code[11], ecc_code[12]);
+
+	return 0;
+}
+/* add by zjh */
+#define NF8_ReadPage_Adv(a,b,c) (((int(*)(u32, u32, u8*))(*((u32 *)0xD0037F90)))(a,b,c))
+static int s5pv210_nand_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
+				uint8_t *buf, int oob_required, int page)
+{
+	/* TQ210使用的NAND FLASH一个块64页 */
+	return NF8_ReadPage_Adv(page / 64, page % 64, buf);
+}
+
+static int s5pv210_nand_correct_data(struct mtd_info *mtd, u_char *dat,
+				     u_char *read_ecc, u_char *calc_ecc)
+{
+	if (read_ecc[0] == calc_ecc[0] &&
+	    read_ecc[1] == calc_ecc[1] &&
+	    read_ecc[2] == calc_ecc[2])
+		return 0;
+
+	printf("s5pv210_nand_correct_data: not implemented\n");
+	return -1;
+}
+#endif
+
+
+/******************************** nand flash 启动 成功 *****************************************/
+我们修改 board/samsung/smart210/smart210.c 中的 copy_bl2_to_ram 函数,在这个函数中首先判断
+当前是从 SD 卡启动还是从 NAND 启动,如果是从 NAND 启动则进行 NAND 初始化,然后从 NAND 拷贝
+BL2 到 DDR 内存
+我们通过读取 OMR 寄存器来判断 S5PV210 当前是从哪个设备启动的。参考手册 Table 6-3,手册上
+并没有说 OM 寄存器的地址,我是参考的三星原厂的 u-boot 代码。
+
+在board/samsung/smart210/smart210.c
+void copy_bl2_to_ram(void)
+{
+/*
+** ch:  通道
+** sb:  起始块
+** bs:  块大小
+** dst: 目的地
+** i: 	是否初始化
+*/
+#define CopySDMMCtoMem(ch, sb, bs, dst, i) \
+	(((u8(*)(int, u32, unsigned short, u32*, u8))\
+	(*((u32 *)0xD0037F98)))(ch, sb, bs, dst, i))
+	
+#define MP0_1CON  (*(volatile u32 *)0xE02002E0)
+#define	MP0_3CON  (*(volatile u32 *)0xE0200320)
+#define	MP0_6CON  (*(volatile u32 *)0xE0200380)	
+
+#define NF8_ReadPage_Adv(a,b,c) (((int(*)(u32, u32, u8*))(*((u32 *)0xD0037F90)))(a,b,c))
+	
+	u32 bl2Size = 250 * 1024;	// 250K
+	
+	u32 OM = *(volatile u32 *)(0xE0000004);	// OM Register
+	OM &= 0x1F;					// 取低5位
+	
+	if (OM == 0x2)				// NAND 2 KB, 5cycle 8-bit ECC
+	{
+#if 1
+		u32 cfg = 0;
+		struct s5pv210_nand *nand_reg = (struct s5pv210_nand *)(struct s5pv210_nand *)samsung_get_base_nand();
+		
+		/* initialize hardware */
+		/* HCLK_PSYS=133MHz(7.5ns) */
+		cfg =	(0x1 << 23) |	/* Disable 1-bit and 4-bit ECC */
+				/* 下面3个时间参数稍微比计算出的值大些（我这里依次加1），否则读写不稳定 */
+				(0x3 << 12) |	/* 7.5ns * 2 > 12ns tALS tCLS */
+				(0x2 << 8) | 	/* (1+1) * 7.5ns > 12ns (tWP) */
+				(0x1 << 4) | 	/* (0+1) * 7.5 > 5ns (tCLH/tALH) */
+				(0x0 << 3) | 	/* SLC NAND Flash */
+				(0x0 << 2) |	/* 2KBytes/Page */
+				(0x1 << 1);		/* 5 address cycle */
+	
+		writel(cfg, &nand_reg->nfconf);
+		
+		writel((0x1 << 1) | (0x1 << 0), &nand_reg->nfcont);
+		/* Disable chip select and Enable NAND Flash Controller */
+	
+		/* Config GPIO */
+		MP0_1CON &= ~(0xFFFF << 8);
+		MP0_1CON |= (0x3333 << 8);
+		MP0_3CON = 0x22222222;
+		MP0_6CON = 0x22222222;		
+		
+		int i = 0;
+		int pages = bl2Size / 2048;		// 多少页
+		int offset = 0x4000 / 2048;			// u-boot.bin在NAND中的偏移地址(页地址)
+		u8 *p = (u8 *)CONFIG_SYS_SDRAM_BASE;
+		for (; i < pages; i++, p += 2048, offset += 1)
+			NF8_ReadPage_Adv(offset / 64, offset % 64, p);
+#endif
+	}
+	else if (OM == 0xC)		// SD/MMC
+	{
+		u32 V210_SDMMC_BASE = *(volatile u32 *)(0xD0037488);	// V210_SDMMC_BASE
+		u8 ch = 0;
+		
+		/* 参考S5PV210手册7.9.1 SD/MMC REGISTER MAP */
+		if (V210_SDMMC_BASE == 0xEB000000)		// 通道0
+			ch = 0;
+		else if (V210_SDMMC_BASE == 0xEB200000)	// 通道2
+			ch = 2;
+		CopySDMMCtoMem(ch, 32, bl2Size / 512, (u32 *)CONFIG_SYS_SDRAM_BASE, 0);
+	}
+}	
+
+调试:
+SMART210 # tftp 20000000 smart210-spl.bin
+SMART210 # nand write 20000000 0 $filesize		//写到0地址的地方
+SMART210 # tftp 20000000 u-boot.bin       
+SMART210 # nand write 20000000 4000 $filesize		//写到16kb,即0x4000地址的地方
+
+
+/******************************** nand flash 合并(combine) 并启动 成功 *****************************************/
+
+合并 smdkv210-spl.bin 和 u-boot.bin 为一个文件:
+我们可以将上面合并单文件的那一系列命令写入 主目录Makefile,这样比较方便。
+首先在 ALL 中添加一个目标 combine
+# combine add by zjh
+ALL-y += u-boot.srec u-boot.bin System.map combine
+all:		$(ALL-y)
+#add by zjh
+combine: u-boot.bin spl/u-boot-spl.bin FORCE
+	cp $(objtree)/spl/smart210-spl.bin $(objtree)/tmp.bin
+	truncate $(objtree)/tmp.bin -c -s 16K
+	cat $(objtree)/u-boot.bin >> $(objtree)/tmp.bin
+	cp $(objtree)/tmp.bin $(objtree)/u-boot-combine.bin
+	cp $(objtree)/u-boot-combine.bin /tftpboot/
+
+调试:
+SMART210 # nand erase.part bootloader
+SMART210 # tftp 20000000 u-boot-combine.bin
+SMART210 # nand write 20000000 bootloader $filesize
+
+
+/******************************** 添加启动菜单 成功 *****************************************/
+
+include/configs/smart210.h
+/* add by zjh, for bootmenu */
+#define CONFIG_CMD_BOOTMENU
+#define CONFIG_MENU
+#define CONFIG_AUTOBOOT_KEYED
+#define CONFIG_MENU_SHOW
+#define CONFIG_BOOTDELAY	3	//菜单显示的时间
+
+使用 setenv 添加菜单的格式为
+bootmenu_<num> "<title>=<commands>"
+<num> 菜单编号,从 0 开始
+<title> 菜单标题
+<commands> 当一个菜单被选中后要执行的命令
+标题和命令以第一个“=”为分界点
+延迟结束后 u-boot 立即执行第一个菜单的命令
+按上下键来选择菜单,被选中的菜单以高亮显示,按回车键执行被选中的菜单的命令
+按 Esc 键或者 Q 键退出延迟计数,一直显示菜单,直到用户选择某个菜单执行
+将所有命令写在一行命令之间使用“;”隔开
+
+调试:
+setenv bootmenu_0 "start0=tftp 20000000 uImage; bootm"  //要求菜单项执行多条命令,除了";"分割,还一定要加 "" 来包括整段命令内容!!
+							//只加;号的话,会误认为;前后是两条独立的命令!!!!
+setenv bootmenu_1 test=echo $filesize
+save		//然后命令参数便存入了环境变量里,存到nandflash里
+重启uboot后会在菜单出现start和test两项,选择后执行相关内容.
+所以,环境变量除了供linux使用外,还为uboot自身服务
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

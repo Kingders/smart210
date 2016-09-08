@@ -128,7 +128,7 @@ tmpfs     /dev          tmpfs    defaults       0     0
 修改主Makefile:		//非常重要,确保后面的配置操作时(包括make menuconfig),配置系统只调出 arm 架构的配置选项,而非其他内容
 #add by huang
 ARCH		?= arm
-CROSS_COMPILE	?= arm-linux
+CROSS_COMPILE	?= arm-linux-
 
 
 配置操作:

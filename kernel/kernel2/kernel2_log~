@@ -1123,18 +1123,479 @@ File systems --->
 
 
 
-
-
 /**************************** 重新编译 *********************************/
 进度;完成了 nfs  rootfs是rootfs/rootfs1,使用tools/busybox/busybox-1.21.1
 
 
 
 
+/**************************** fucking_one_wire_lcd  点亮lcd*********************************/
+参考:	http://www.epubit.com.cn/article/236?utm_source=tuicool&utm_medium=referral
+	http://www.tuicool.com/articles/BBvEjeN
+	http://www.linuxidc.com/Linux/2012-01/52087.htm
+	http://www.linuxidc.com/Linux/2012-01/52086.htm
+(拷贝来自友善之臂的linux-3.08源码)
+drivers/input/touchscreen/mini210_1wire_host.c
+/home/kingders/smart210/kernel/kernel2/linux-3.10.102/arch/arm/plat-samsung/include/plat/ctouch.h
+/home/kingders/smart210/kernel/kernel2/linux-3.10.102/arch/arm/include/asm/leds_h	//似乎没有用到
+
+drivers/input/touchscreen:Makefile添加:
+# add by huang
+obj-$(CONFIG_TOUCHSCREEN_1WIRE)		+= mini210_1wire_host.o
+
+drivers/input/touchscreen:Kconfig增加:
+config TOUCHSCREEN_1WIRE
+	tristate"Mini210 1-Wire host and Touch Screen Driver"
+	help
+	  Say Y here to enable the 1-Wire host andTouch Screen driver for
+	  FriendlyARM Mini210 development board.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose Mhere: the
+	  module will be called mini210_1wire_host.
+
+arch/arm/mach-s5pv210/mach-smdkv210.c添加:
+static struct platform_device *smdkv210_devices[] __initdata = {
+.........
+	/* add by huang */
+	&s3c_device_1wire,	//逗号是需要的
+.........
+/* add by huang */
+static struct platform_devices3c_device_1wire = {
+	.name		= "mini210_1wire",
+	.id		= -1,
+	.num_resources	= 0,
+};
 
 
+调试:
+先在make menuconfig,选中 Mini210 1-Wire host and Touch Screen Driver
+
+几乎围绕mini210_1wire_host.c调试:
+
+error: implicit declaration of function '__devexit_p',
+在liuux3.08发现include/linux/init.h:#define __devexit_p(x) x
+所以取消__devexit_p的写法
 
 
+关于3.10,与3.08的proc文件系统改变的移植,
+mini210_1wire_host.c:	
+	create_proc_read_entry("driver/one-wire-info", 0, NULL, read_proc, NULL);
+
+发现3.10完全删掉了:
+	read_proc_t *read_proc;
+	write_proc_t *write_proc;
+所以根本不是简单移植的问题,后来发现,直接不用这个create_proc_read_entry初始化也可以!!
+
+
+///////////////////linux3.08
+include/linux/proc_fs.h:
+static inline struct proc_dir_entry *create_proc_read_entry(const char *name,
+	mode_t mode, struct proc_dir_entry *base, 
+	read_proc_t *read_proc, void * data)
+{
+	struct proc_dir_entry *res=create_proc_entry(name,mode,base);
+	if (res) {
+		res->read_proc=read_proc;
+		res->data=data;
+	}
+	return res;
+}
+fs/proc/generic.c:
+struct proc_dir_entry *create_proc_entry(const char *name, mode_t mode,
+					 struct proc_dir_entry *parent)
+{
+	struct proc_dir_entry *ent;
+	nlink_t nlink;
+
+	if (S_ISDIR(mode)) {
+		if ((mode & S_IALLUGO) == 0)
+			mode |= S_IRUGO | S_IXUGO;
+		nlink = 2;
+	} else {
+		if ((mode & S_IFMT) == 0)
+			mode |= S_IFREG;
+		if ((mode & S_IALLUGO) == 0)
+			mode |= S_IRUGO;
+		nlink = 1;
+	}
+
+	ent = __proc_create(&parent, name, mode, nlink);
+	if (ent) {
+		if (proc_register(parent, ent) < 0) {
+			kfree(ent);
+			ent = NULL;
+		}
+	}
+	return ent;
+}
+EXPORT_SYMBOL(create_proc_entry);
+struct proc_dir_entry {
+	unsigned int low_ino;
+	unsigned int namelen;
+	const char *name;
+	mode_t mode;
+	nlink_t nlink;
+	uid_t uid;
+	gid_t gid;
+	loff_t size;
+	const struct inode_operations *proc_iops;
+	/*
+	 * NULL ->proc_fops means "PDE is going away RSN" or
+	 * "PDE is just created". In either case, e.g. ->read_proc won't be
+	 * called because it's too late or too early, respectively.
+	 *
+	 * If you're allocating ->proc_fops dynamically, save a pointer
+	 * somewhere.
+	 */
+	const struct file_operations *proc_fops;
+	struct proc_dir_entry *next, *parent, *subdir;
+	void *data;
+	read_proc_t *read_proc;
+	write_proc_t *write_proc;
+	atomic_t count;		/* use count */
+	int pde_users;	/* number of callers into module in progress */
+	spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
+	struct completion *pde_unload_completion;
+	struct list_head pde_openers;	/* who did ->open, but not ->release */
+};
+struct proc_dir_entry {
+	unsigned int low_ino;
+	unsigned int namelen;
+	const char *name;
+	mode_t mode;
+	nlink_t nlink;
+	uid_t uid;
+	gid_t gid;
+	loff_t size;
+	const struct inode_operations *proc_iops;
+	/*
+	 * NULL ->proc_fops means "PDE is going away RSN" or
+	 * "PDE is just created". In either case, e.g. ->read_proc won't be
+	 * called because it's too late or too early, respectively.
+	 *
+	 * If you're allocating ->proc_fops dynamically, save a pointer
+	 * somewhere.
+	 */
+	const struct file_operations *proc_fops;
+	struct proc_dir_entry *next, *parent, *subdir;
+	void *data;
+	read_proc_t *read_proc;
+	write_proc_t *write_proc;
+	atomic_t count;		/* use count */
+	int pde_users;	/* number of callers into module in progress */
+	spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
+	struct completion *pde_unload_completion;
+	struct list_head pde_openers;	/* who did ->open, but not ->release */
+};
+///////////////////linux3.10
+include/linux/proc_fs.h:
+static inline struct proc_dir_entry *proc_create(
+	const char *name, umode_t mode, struct proc_dir_entry *parent,
+	const struct file_operations *proc_fops)
+{
+	return proc_create_data(name, mode, parent, proc_fops, NULL);
+}
+fs/proc/generic.c:
+struct proc_dir_entry *proc_create_data(const char *name, mode_t mode,
+					struct proc_dir_entry *parent,
+					const struct file_operations *proc_fops,
+					void *data)
+{
+	struct proc_dir_entry *pde;
+	nlink_t nlink;
+
+	if (S_ISDIR(mode)) {
+		if ((mode & S_IALLUGO) == 0)
+			mode |= S_IRUGO | S_IXUGO;
+		nlink = 2;
+	} else {
+		if ((mode & S_IFMT) == 0)
+			mode |= S_IFREG;
+		if ((mode & S_IALLUGO) == 0)
+			mode |= S_IRUGO;
+		nlink = 1;
+	}
+
+	pde = __proc_create(&parent, name, mode, nlink);
+	if (!pde)
+		goto out;
+	pde->proc_fops = proc_fops;
+	pde->data = data;
+	if (proc_register(parent, pde) < 0)
+		goto out_free;
+	return pde;
+out_free:
+	kfree(pde);
+out:
+	return NULL;
+}
+EXPORT_SYMBOL(proc_create_data);
+fs/proc/internal.h
+struct proc_dir_entry {
+	unsigned int low_ino;
+	umode_t mode;
+	nlink_t nlink;
+	kuid_t uid;
+	kgid_t gid;
+	loff_t size;
+	const struct inode_operations *proc_iops;
+	const struct file_operations *proc_fops;
+	struct proc_dir_entry *next, *parent, *subdir;
+	void *data;
+	atomic_t count;		/* use count */
+	atomic_t in_use;	/* number of callers into module in progress; */
+			/* negative -> it's going away RSN */
+	struct completion *pde_unload_completion;
+	struct list_head pde_openers;	/* who did ->open, but not ->release */
+	spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
+	u8 namelen;
+	char name[];
+};
+include/linux/fs.h
+struct file_operations {
+	struct module *owner;
+	loff_t (*llseek) (struct file *, loff_t, int);
+	ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
+	ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
+	ssize_t (*aio_read) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
+	ssize_t (*aio_write) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
+	int (*readdir) (struct file *, void *, filldir_t);
+	unsigned int (*poll) (struct file *, struct poll_table_struct *);
+	long (*unlocked_ioctl) (struct file *, unsigned int, unsigned long);
+	long (*compat_ioctl) (struct file *, unsigned int, unsigned long);
+	int (*mmap) (struct file *, struct vm_area_struct *);
+	int (*open) (struct inode *, struct file *);
+	int (*flush) (struct file *, fl_owner_t id);
+	int (*release) (struct inode *, struct file *);
+	int (*fsync) (struct file *, loff_t, loff_t, int datasync);
+	int (*aio_fsync) (struct kiocb *, int datasync);
+	int (*fasync) (int, struct file *, int);
+	int (*lock) (struct file *, int, struct file_lock *);
+	ssize_t (*sendpage) (struct file *, struct page *, int, size_t, loff_t *, int);
+	unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
+	int (*check_flags)(int);
+	int (*flock) (struct file *, int, struct file_lock *);
+	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
+	ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
+	int (*setlease)(struct file *, long, struct file_lock **);
+	long (*fallocate)(struct file *file, int mode, loff_t offset,
+			  loff_t len);
+	int (*show_fdinfo)(struct seq_file *m, struct file *f);
+};
+
+
+继续调试:
+undefined reference to `mini210_get_ctp'
+grep 发现缺乏 mini210-lcds.c,所以拷贝到:arch/arm/mach-s5pv210/mini210-lcds.c
+grep 发现缺乏 s3cfb.h,所以拷贝到:arch/arm/mach-s5pv210/include/mach/s3cfb.h
+修改:arch/arm/mach-s5pv210/mini210-lcds.c添加
+/* add by huang */
+#include <mach/s3cfb.h>
+修改arch/arm/mach-s5pv210/Makefile
+obj-$(CONFIG_MACH_SMDKV210)	+= mach-smdkv210.o mini210-lcds.o
+
+依然:
+undefined reference to `mini210_get_ctp'
+发现mini210-lcds.c的mini210_get_ctp被宏CONFIG_TOUCHSCREEN_GOODIX  CONFIG_TOUCHSCREEN_FT5X0X控制!!
+注释掉宏!!
+最后成功点亮lcd!!!
+
+grep 过,发现只有mini210_1wire_host.c初始化,而,mini210-lcds.c并没有初始化
+
+/**************************** fucking_one_wire_lcd  驱动lcd*********************************/
+按照嵌入笔记继续驱动lcd:
+drivers/video/s3c-fb.c:
+static struct platform_device_id s3c_fb_driver_ids[] = {
+	{
+		.name		= "s3c-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_64xx,
+	}, {
+		.name		= "s5pc100-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_s5pc100,
+	}, {
+		.name		= "s5pv210-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_s5pv210,
+	}, {
+		.name		= "exynos4-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_exynos4,
+	}, {
+		.name		= "exynos5-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_exynos5,
+	}, {
+		.name		= "s3c2443-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_s3c2443,
+	}, {
+		.name		= "s5p64x0-fb",
+		.driver_data	= (unsigned long)&s3c_fb_data_s5p64x0,
+	},
+	{},
+};
+MODULE_DEVICE_TABLE(platform, s3c_fb_driver_ids);
+
+arch/arm/plat-samsung/devs.c
+struct platform_device s3c_device_fb = {
+	.name		= "s3c-fb",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(s3c_fb_resource),
+	.resource	= s3c_fb_resource,
+	.dev		= {
+		.dma_mask		= &samsung_device_dma_mask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+	},
+};
+
+这里的 name 属性为“s3c-fb”,我们的 s5pv210 要匹配上面的 s3c_fb_driver_ids 中 s5pv210-fb,只有
+把 s3c_device_fb 中的 name 属性设置为“s5pv210-fb”,三星提供了一个函数来设置,在
+arch/arm/mach-s5pv210/common.c 中的 s5pv210_map_io 函数中进行了设置
+void __init s5pv210_map_io(void)
+{
+	/* initialise device information early */
+	s5pv210_default_sdhci0();
+	s5pv210_default_sdhci1();
+	s5pv210_default_sdhci2();
+	s5pv210_default_sdhci3();
+
+	s3c_adc_setname("samsung-adc-v3");
+
+	s3c_cfcon_setname("s5pv210-pata");
+
+	s3c_fimc_setname(0, "s5pv210-fimc");
+	s3c_fimc_setname(1, "s5pv210-fimc");
+	s3c_fimc_setname(2, "s5pv210-fimc");
+
+	/* the i2c devices are directly compatible with s3c2440 */
+	s3c_i2c0_setname("s3c2440-i2c");
+	s3c_i2c1_setname("s3c2440-i2c");
+	s3c_i2c2_setname("s3c2440-i2c");
+
+	s3c_fb_setname("s5pv210-fb");
+
+	/* Use s5pv210-keypad instead of samsung-keypad */
+	samsung_keypad_setname("s5pv210-keypad");
+
+	/* setup TV devices */
+	s5p_hdmi_setname("s5pv210-hdmi");
+
+	s3c64xx_spi_setname("s5pv210-spi");
+}
+可以看到,三星的很多驱动都是采用这种方式,首先定义一个公用的平台设备,然后在根据特点的 CPU
+来设置平台设备的 name 属性,这样做减少了重复代码。
+
+arch/arm/mach-s5pv210/mach-smdkv210.c
+/* modied by zjh */
+static void smdkv210_lte480wv_set_power(struct plat_lcd_data *pd,
+					unsigned int power)
+{
+	if (power) {
+#if !defined(CONFIG_BACKLIGHT_PWM)
+		gpio_request_one(S5PV210_GPD0(1), GPIOF_OUT_INIT_HIGH, "GPD0");		//GPD0_1	背光灯控制针
+		gpio_free(S5PV210_GPD0(1));
+#endif
+#if 0
+		/* fire nRESET on power up */
+		gpio_request_one(S5PV210_GPH0(6), GPIOF_OUT_INIT_HIGH, "GPH0");
+
+		gpio_set_value(S5PV210_GPH0(6), 0);
+		mdelay(10);
+
+		gpio_set_value(S5PV210_GPH0(6), 1);
+		mdelay(10);
+
+		gpio_free(S5PV210_GPH0(6));
+#endif		
+	} else {
+#if !defined(CONFIG_BACKLIGHT_PWM)
+		gpio_request_one(S5PV210_GPD0(1), GPIOF_OUT_INIT_LOW, "GPD0");
+		gpio_free(S5PV210_GPD0(1));
+#endif
+	}
+}
+static struct plat_lcd_data smdkv210_lcd_lte480wv_data = {
+	.set_power	= smdkv210_lte480wv_set_power,
+};
+
+static struct platform_device smdkv210_lcd_lte480wv = {
+	.name			= "platform-lcd",
+	.dev.parent		= &s3c_device_fb.dev,
+	.dev.platform_data	= &smdkv210_lcd_lte480wv_data,
+};
+static struct s3c_fb_pd_win smdkv210_fb_win0 = {
+	.max_bpp	= 32,
+	.default_bpp	= 24,
+	.xres		= 800,
+	.yres		= 480,
+};
+static struct fb_videomode smdkv210_lcd_timing = {
+	.left_margin	= 46,
+	.right_margin	= 8,
+	.upper_margin	= 23,
+	.lower_margin	= 22,
+	.hsync_len	= 2,
+	.vsync_len	= 2,
+	.xres		= 800,
+	.yres		= 480,
+};
+static struct s3c_fb_platdata smdkv210_lcd0_pdata __initdata = {
+	.win[0]		= &smdkv210_fb_win0,
+	.vtiming	= &smdkv210_lcd_timing,
+	.vidcon0	= VIDCON0_VIDOUT_RGB | VIDCON0_PNRMODE_RGB,
+	.vidcon1	= VIDCON1_INV_HSYNC | VIDCON1_INV_VSYNC,
+	.setup_gpio	= s5pv210_fb_gpio_setup_24bpp,
+};
+
+根据 LCD 手册配置这些参数。注意到这里没有配置像素时钟,是因为在驱动 s3c-fb.c 中根据上面的时序参数计算出来的。
+drivers/video/s3c-fb.c:
+static void s3c_fb_set_rgb_timing(struct s3c_fb *sfb)
+{
+	struct fb_videomode *vmode = sfb->pdata->vtiming;
+	void __iomem *regs = sfb->regs;
+	int clkdiv;
+	u32 data;
+
+	if (!vmode->pixclock)
+		s3c_fb_missing_pixclock(vmode);
+......
+static void s3c_fb_missing_pixclock(struct fb_videomode *mode)	//通过这个函数计算出像素时钟来
+{
+	u64 pixclk = 1000000000000ULL;
+	u32 div;
+
+	div  = mode->left_margin + mode->hsync_len + mode->right_margin +
+	       mode->xres;
+	div *= mode->upper_margin + mode->vsync_len + mode->lower_margin +
+	       mode->yres;
+	div *= mode->refresh ? : 60;
+
+	do_div(pixclk, div);
+
+	mode->pixclock = pixclk;
+}
+
+上面的平台数据都是 s3c_device_fb 这个平台设备的
+
+XpwmTOUT1 对应GPD0_1	背光灯控制针,但已经被 友善的1wire_lcd 劫持,相当于无作用
+XEINT10	  对应GPH1_2	lcd的外部中断针
+
+另外还定义了一个 smdkv210_lcd_lte480wv 平台设备,这个设备主要是提供 LCD 的背光操作
+其对应的驱动为drivers/video/backlight/platform_lcd.c
+然而背光已经被劫持,不过还是设置吧,防止实验有bug
+
+配置;make menuconfig
+Device Drivers --->
+	Graphics support --->
+		<*> Support for frame buffer devices  --->
+			<*> Samsung S3C framebuffer support
+		[*] Backlight & LCD device support --->
+			<*> Lowlevel LCD controls
+			<*> Platform LCD controls
+			<*> Lowlevel Backlight controls
+			<*> Generic (aka Sharp Corgi) Backlight Driver
+		Console display driver support --->
+			<*> Framebuffer Console support
+		[*] Bootup logo --->	//显示企鹅logo
+成功lcd!!!
 
 
 

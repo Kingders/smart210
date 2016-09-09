@@ -1,0 +1,29 @@
+#!/bin/sh
+`hostname huang`
+HOSTNAME=`hostname`
+USER=`id -un`
+LOGNAME=$USER
+HOME=$USER
+PS1="[\u@$\h: \W]\# "
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
+export PATH LD_LIBRARY_PATH HOSTNAME USER PS1 LOGNAME HOME
+export TSLIB_ROOT=/opt/tslib  
+export TSLIB_CALIBFILE=/etc/pointercal  
+export TSLIB_CONFFILE=/etc/ts.conf  
+export TSLIB_PLUGINDIR=/usr/lib/ts  
+export TSLIB_CONSOLEDEVICE=none  
+export TSLIB_FBDEVICE=/dev/fb0  
+export TSLIB_TSDEVICE=/dev/touchscreen-1wire  
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TSLIB_ROOT/lib:/opt/qt/armv7/lib/
+export PATH=$PATH:$TSLIB_ROOT/bin
+export LD_PRELOAD=/lib/preloadable_libiconv.so
+
+export QT_QPA_PLATFORM_PLUGIN_PATH=/opt/qt/armv7/plugins/platforms  
+export QT_QPA_PLATFORM=linuxfb:tty=/dev/fb0  
+export QT_QPA_FONTDIR=/opt/qt/armv7/lib/fonts  
+export QT_QPA_GENERIC_PLUGINS=tslib:/dev/touchscreen-1wire
+
+alias ll="ls -l"
+echo "Processing /etc/profile... "
+echo "Done"

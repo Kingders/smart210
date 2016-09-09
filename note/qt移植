@@ -1,0 +1,388 @@
+
+
+
+安装arm-linux-gcc-4.5.1
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ sudo tar xvzf arm-linux-gcc-4.5.1-v6-vfp-20120301.tgz -C /
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ sudo gedit /root/.bashrc
+最后添加：export PATH=$PATH:/opt/FriendlyARM/toolschain/4.5.1/bin
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ sudo gedit ~/.bashrc
+最后添加：export PATH=$PATH:/opt/FriendlyARM/toolschain/4.5.1/bin
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ sudo apt-get install lsb-core
+//因为pc是amd64架构，但友善提供的arm-linux-gcc-4.5.1是32位
+
+
+////////////////////////////////qt移植
+设置
+qtbase/mkspecs/linux-arm-gnueabi-g++/qmake.conf
+#
+# qmake configuration for building with arm-linux-gnueabi-g++
+#
+
+MAKEFILE_GENERATOR      = UNIX
+CONFIG                 += incremental
+QMAKE_INCREMENTAL_STYLE = sublib
+
+QT_QPA_DEFAULT_PLATFORM = linuxfb   
+#QMAKE_CFLAGS_RELEASE   +=-O2 -march=armv5te  
+QMAKE_CFLAGS_RELEASE	+= -O2 -march=armv7-a      	#选择armv7架构
+QMAKE_CXXFLAGS_RELEASE	+= -O2 -march=armv7-a  		#选择armv7架构
+
+include(../common/linux.conf)
+include(../common/gcc-base-unix.conf)
+include(../common/g++-unix.conf)
+
+# modifications to g++.conf
+QMAKE_CC                = arm-none-linux-gnueabi-gcc
+QMAKE_CXX               = arm-none-linux-gnueabi-g++
+QMAKE_LINK              = arm-none-linux-gnueabi-g++
+QMAKE_LINK_SHLIB        = arm-none-linux-gnueabi-g++
+
+# modifications to linux.conf
+QMAKE_AR                = arm-none-linux-gnueabi-ar cqs
+QMAKE_OBJCOPY           = arm-none-linux-gnueabi-objcopy
+QMAKE_NM                = arm-none-linux-gnueabi-nm -P
+QMAKE_STRIP             = arm-none-linux-gnueabi-strip
+load(qt_config)
+
+
+配置：
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ ./configure -release -opensource -xplatform linux-arm-gnueabi-g++ -prefix /home/kl/temp/Qt-5.6.0/armv7-a -no-c++11 -qreal float
+//参数说明：
+//-xplatform linux-arm-gnueabi-g++ 说明 生成的QT工具包和库是面向arm架构的，表示这些工具和库要用对应的编译工具生成
+//-prefix /home/kl/temp/Qt-5.6.0/armv7-a 表示 生成的QT工具包和库 要install到的目标文件夹
+
+log：
++ cd qtbase
++ /home/kl/temp/qt-everywhere-opensource-src-5.6.0-rc/qtbase/configure -top-level -release -opensource -xplatform linux-arm-gnueabi-g++ -prefix /home/kl/temp/Qt-5.6.0/armv7-a -no-c++11 -qreal float
+
+This is the Qt Open Source Edition.
+
+You are licensed to use this software under the terms of
+the Lesser GNU General Public License (LGPL) versions 2.1.
+You are also licensed to use this software under the terms of
+the GNU Lesser General Public License (LGPL) versions 3.
+
+Type '3' to view the GNU Lesser General Public License version 3.
+Type 'L' to view the Lesser GNU General Public License version 2.1.
+Type 'yes' to accept this license offer.
+Type 'no' to decline this license offer.
+
+Do you accept the terms of either license? yes
+
+Running configuration tests (phase 1)...
+/home/kl/temp/qt-everywhere-opensource-src-5.6.0-rc/qtbase/configure: 3481: /home/kl/temp/qt-everywhere-opensource-src-5.6.0-rc/qtbase/configure: arm-linux-gnueabi-g++: not found			//问题根源
+Done running configuration tests.
+Creating qmake...
+.........................................................................................Done.
+Running configuration tests (phase 2)...
+Warning: Disabling pkg-config since PKG_CONFIG_LIBDIR is not set and
+the host's .pc files would be used (even if you set PKG_CONFIG_PATH).
+Set this variable to the directory that contains target .pc files
+for pkg-config to function correctly when cross-compiling or
+use -pkg-config to override this test.
+Warning: Disabling pkg-config since PKG_CONFIG_SYSROOT_DIR is not set.
+Set this variable to your sysroot for pkg-config to function correctly when
+cross-compiling or use -pkg-config to override this test.
+
+Could not determine the target architecture!
+Turn on verbose messaging (-v) to see the final report.
+No QPA platform plugin enabled!
+ If you really want to build without a QPA platform plugin you must pass
+ -no-qpa-platform-guard to configure. Doing this will
+ produce a Qt that can not run GUI applications.
+ The dependencies needed for xcb to build are listed in
+ src/plugins/platforms/xcb/README
+
+//这里出现问题！！！！！！！
+arm-linux-gnueabi-g++: not found
+由于交叉编译器的名称不一致，所以表示找不到，查看已安装的友善提供的编译器发现，编译器工具们都是以arm-none-linux-gnueabi-前缀
+修改交叉编译器名称，
+在qtbase/mkspecs/linux-arm-gnueabi-g++/qmake.conf下，修改qmake.conf文件，
+注意把 arm-linux-gnueabi-xxx 替换 arm-none-linux-gnueabi-xxx
+
+再调试：
+kl@kl-Lenovo-Product:~/temp/qt-everywhere-opensource-src-5.6.0-rc$ ./configure -release -opensource -xplatform linux-arm-gnueabi-g++ -prefix /home/kl/temp/Qt-5.6.0/armv7-a -no-c++11 -qreal float
++ cd qtbase
++ /home/kl/temp/qt-everywhere-opensource-src-5.6.0-rc/qtbase/configure -top-level -release -opensource -xplatform linux-arm-gnueabi-g++ -prefix /home/kl/temp/Qt-5.6.0/armv7-a -no-c++11 -qreal float
+
+This is the Qt Open Source Edition.
+
+You are licensed to use this software under the terms of
+the Lesser GNU General Public License (LGPL) versions 2.1.
+You are also licensed to use this software under the terms of
+the GNU Lesser General Public License (LGPL) versions 3.
+
+Type '3' to view the GNU Lesser General Public License version 3.
+Type 'L' to view the Lesser GNU General Public License version 2.1.
+Type 'yes' to accept this license offer.
+Type 'no' to decline this license offer.
+
+Do you accept the terms of either license? yes
+
+Running configuration tests (phase 1)...
+Done running configuration tests.
+Creating qmake...
+.Done.
+Running configuration tests (phase 2)...
+Warning: Disabling pkg-config since PKG_CONFIG_LIBDIR is not set and
+the host's .pc files would be used (even if you set PKG_CONFIG_PATH).
+Set this variable to the directory that contains target .pc files
+for pkg-config to function correctly when cross-compiling or
+use -pkg-config to override this test.
+Warning: Disabling pkg-config since PKG_CONFIG_SYSROOT_DIR is not set.
+Set this variable to your sysroot for pkg-config to function correctly when
+cross-compiling or use -pkg-config to override this test.
+Done running configuration tests.
+
+   Configure summary
+
+Building on:   linux-g++ (x86_64, CPU features: mmx sse sse2)
+Building for:  linux-arm-gnueabi-g++ (arm, CPU features: none detected)
+Platform notes:
+
+            - Also available for Linux: linux-clang linux-kcc linux-icc linux-cxx
+        
+Build options:
+  Configuration .......... accessibility alsa audio-backend clock-gettime clock-monotonic compile_examples concurrent cross_compile dbus enable_new_dtags evdev eventfd freetype full-config getaddrinfo getifaddrs harfbuzz iconv inotify ipv6ifname large-config largefile linuxfb medium-config minimal-config mremap nis no-pkg-config openssl pcre png posix_fallocate precompile_header qpa qpa reduce_exports release rpath shared small-config system-jpeg system-png system-zlib threadsafe-cloexec tslib 
+  Build parts ............ libs examples
+  Mode ................... release
+  Using sanitizer(s)...... none
+  Using C++ standard ..... c++98
+  Using gold linker....... no
+  Using new DTAGS ........ yes
+  Using PCH .............. yes
+  Using LTCG ............. no
+  Target compiler supports:
+    Neon ................. no
+
+Qt modules and options:
+  Qt D-Bus ............... yes (loading dbus-1 at runtime)
+  Qt Concurrent .......... yes
+  Qt GUI ................. yes
+  Qt Widgets ............. yes
+  Large File ............. yes
+  QML debugging .......... yes
+  Use system proxies ..... no
+
+Support enabled for:
+  Accessibility .......... yes
+  ALSA ................... yes
+  CUPS ................... no
+  Evdev .................. yes
+  FontConfig ............. no
+  FreeType ............... yes (bundled copy)
+  Glib ................... no
+  GStreamer .............. no
+  GTK theme .............. no
+  HarfBuzz ............... yes (bundled copy)
+  Iconv .................. yes
+  ICU .................... no
+  Image formats: 
+    GIF .................. yes (plugin, using bundled copy)
+    JPEG ................. yes (plugin, using system library)
+    PNG .................. yes (in QtGui, using system library)
+  libinput................ no
+  Logging backends: 
+    journald ............... no
+    syslog   ............... no
+  mtdev .................. no
+  Networking: 
+    getaddrinfo .......... yes
+    getifaddrs ........... yes
+    IPv6 ifname .......... yes
+    libproxy.............. no
+    OpenSSL .............. yes (loading libraries at run-time)
+  NIS .................... yes
+  OpenGL / OpenVG: 
+    EGL .................. no
+    OpenGL ............... no
+    OpenVG ............... no
+  PCRE ................... yes (bundled copy)
+  pkg-config ............. no 
+  PulseAudio ............. no
+  QPA backends: 
+    DirectFB ............. no
+    EGLFS ................ no
+      EGLFS i.MX6 ........ no
+      EGLFS i.MX6 Wayland. no
+      EGLFS EGLDevice .... no
+      EGLFS GBM .......... no
+      EGLFS Mali ......... no
+      EGLFS Raspberry Pi . no
+      EGLFS X11 .......... no
+    LinuxFB .............. yes
+    Mir client............ no
+    XCB .................. no
+  Session management ..... yes
+  SQL drivers: 
+    DB2 .................. no
+    InterBase ............ no
+    MySQL ................ no
+    OCI .................. no
+    ODBC ................. no
+    PostgreSQL ........... no
+    SQLite 2 ............. no
+    SQLite ............... yes (plugin, using bundled copy)
+    TDS .................. no
+  tslib .................. yes
+  udev ................... no
+  xkbcommon-x11........... no
+  xkbcommon-evdev......... no
+  zlib ................... yes (system library)
+
+Info: creating super cache file /home/kl/temp/qt-everywhere-opensource-src-5.6.0-rc/.qmake.super
+
+        NOTICE: The -no-c++11 / --c++-level=c++98 option is deprecated.
+
+        Qt 5.7 will require C++11 support. The options are in effect for this
+        Qt 5.6 build, but you should update your build scripts to remove the
+        option and, if necessary, upgrade your compiler.
+
+Qt is now configured for building. Just run 'make'.
+Once everything is built, you must run 'make install'.
+Qt will be installed into /home/kl/temp/Qt-5.6.0/armv7-a
+
+Prior to reconfiguration, make sure you remove any leftovers from
+the previous build.
+以上输出表示配置成功
+
+编译
+make
+安装
+make install
+最后生成的qt的工具文件和库都保存在目标文件夹/home/kl/temp/Qt-5.6.0/armv7-a
+
+生成的工具文件有一个arm 架构的 qmake 专门为QT工程生成适合arm架构的makefile
+得到 makefile 后，直接make命令，便能生成arm架构的执行程序
+所以为了方便使用qmake，可以把qmake放到系统的bin文件夹，
+或者添加系统环境变量 gedit /etc/profile 添加变量：
+export PATH=$PATH:/home/kl/temp/Qt-5.6.0/armv7-a/bin:$PATH
+使修改的/etc/profile文件立即生效的命令：source /etc/profile
+最后使用qmake 命令时发现not found  原因是环境变量冲突吧，总之把qmake拷到对应的位置，最后使之能用
+
+
+部署开发板运行环境
+
+把目标文件夹Qt-5.6.0拷贝到开发板文件系统的opt目录，
+例如 我用nfs，nfs的根文件夹在/home/kingders/smart210/rootfs/rootfs1
+那么我拷到 /home/kingders/smart210/rootfs/rootfs1/opt 里
+//注意：由于我开发板使用的kernel还不稳定，cd等操作解释的路径名字不能有特殊符号,例如“-”
+//所以对应在开发板文件系统里，改名Qt-5.6.0为qt，里一层的armv7-a改名为armv7
+
+修改添加开发板的系统变量
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
+export PATH LD_LIBRARY_PATH HOSTNAME USER PS1 LOGNAME HOME
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TSLIB_ROOT/lib:/opt/qt/armv7/lib/	//并合qt库路径/opt/qt/armv7/lib/到LD_LIBRARY_PATH
+export PATH=$PATH:$TSLIB_ROOT/bin
+export QT_QPA_PLATFORM_PLUGIN_PATH=/opt/qt/armv7/plugins/platforms  
+export QT_QPA_PLATFORM=linuxfb:tty=/dev/fb0  					//qt图形插件平台以及对应的输出设备点fb0,即lcd的帧缓存
+export QT_QPA_FONTDIR=/opt/qt/armv7/lib/fonts  
+export QT_QPA_GENERIC_PLUGINS=tslib:/dev/touchscreen-1wire			//使用的鼠标/触摸屏设备
+
+一个网上可参考的配置系统变量的方式：http://www.it165.net/embed/html/201606/3507.html
+创建相关配置文件
+1,在/qt5.6_lib下创建一个配置文件（qt5.6_path.config)，用来存放QT相关的环境变量设置。
+内容如下：
+#QT相关的路径
+export QTDIR=/qt5.6_lib
+#库路径
+export LD_LIBRARY_PATH=$QTDIR/lib
+#键盘
+export QWS_KEYBOARD=USB:/dev/input/event1
+#鼠标指定为触摸屏
+export QWS_MOUSE_PROTO=Tslib:/dev/input/event0
+#qt字体库目录
+export QT_QWS_FONTDIR=$QTDIR/lib/fonts
+#LCD尺寸
+export QWS_SIZE=800x480
+#qt图形插件平台
+export QT_QPA_PLATFORM=linuxfb:tty=/dev/fb0
+#触摸屏-一般的插件
+export QT_QPA_GENERIC_PLUGINS=tslib
+#平台插件
+export QT_QPA_PLATFORM_PLUGIN_PATH=$QTDIR/plugins
+#libiconv库的声明
+export LD_PRELOAD=$QTDIR/lib/preloadable_libiconv.so
+2,创建一个qt5.6_config.sh 脚本文件，用来开机自动加载QT的配置。该脚本只是用来方便移植使用，只需要在移植的时候执行一次，以后就不需要再执行。
+内容如下：
+#!/bin/bash
+grep -q "source /qt5.6_lib/qt5.6_path.config" ../etc/profile||echo "source /qt5.6_lib/qt5.6_path.config">>../etc/profile
+
+
+
+////////////////////////////////qt要依赖的libiconv库 移植
+
+QT程序在运行时需要依赖libiconv库
+下载：http://ftp.gnu.org/gnu/libiconv/libiconv-1.14.tar.gz
+解压并进入对应 libiconv-1.14 目录
+
+编译步骤：
+在libiconv目录下：
+$./configure --prefix=$PWD/temp --host=arm-linux
+//参数
+//--prefix=$PWD/temp  生成文件放置的目标文件夹
+$make
+$make install
+上述命令执行完成后会在libiconv目录下生成新的temp目录，该目录下存在4个目录分别是：
+bin include lib share
+在lib目录下为生成的库文件，其中一个为preloadable_libiconv.so，
+把它下载到开发板的lib目录下，然后再设置开发板的系统环境变量即可：
+export LD_PRELOAD=/lib/preloadable_libiconv.so
+
+最后，开发板执行qt程序时，不会提示 iconv_open failed
+
+
+////////////////////////////////qt要依赖的库 移植
+
+QT运行时需要用到ibjpeg.so.8、libpng14.so.14 等一系列库。这些库在交叉编译器目录下已经编译好，直接拷贝到开发板的lib目录下即可。
+库存放的路径：
+/opt/FriendlyARM/toolschain/4.5.1/arm-none-linux-gnueabi/sys-root/usr/lib
+拷贝示例：
+[root@xiaolong lib]# cp ./* /work/rootfs/lib/ -fd        //  "*/"符号无关
+
+//注意，在之前的开发板测试，已经拷贝好库文件
+
+
+////////////////////////////////在开发板实现一个程序
+生成一个可以在开发板执行的qt程序
+由于已经部署好开发板
+在pc端编译一个qt程序：
+使用生成的qmake生成makefile
+make生成执行程序
+把执行程序拷贝到开发板执行，
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

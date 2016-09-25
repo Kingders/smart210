@@ -116,7 +116,7 @@ static int s5p_ehci_probe(struct platform_device *pdev)
 		s5p_ehci->otg = phy->otg;
 	}
 
-	s5p_ehci->clk = devm_clk_get(&pdev->dev, "usbhost");
+	s5p_ehci->clk = devm_clk_get(&pdev->dev, "usb-host");
 
 	if (IS_ERR(s5p_ehci->clk)) {
 		dev_err(&pdev->dev, "Failed to get usbhost clock\n");

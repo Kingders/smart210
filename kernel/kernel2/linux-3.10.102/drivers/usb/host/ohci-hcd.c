@@ -1111,6 +1111,12 @@ MODULE_LICENSE ("GPL");
 #define S3C2410_PLATFORM_DRIVER	ohci_hcd_s3c2410_driver
 #endif
 
+/* add by huang */
+#ifdef CONFIG_USB_OHCI_S5P  
+#include "ohci-s5p.c"  
+#define S5P_PLATFORM_DRIVER     s5p_ohci_driver  
+#endif  
+
 #ifdef CONFIG_USB_OHCI_EXYNOS
 #include "ohci-exynos.c"
 #define EXYNOS_PLATFORM_DRIVER	exynos_ohci_driver
@@ -1207,6 +1213,7 @@ MODULE_LICENSE ("GPL");
 	!defined(TMIO_OHCI_DRIVER) && \
 	!defined(S3C2410_PLATFORM_DRIVER) && \
 	!defined(EXYNOS_PLATFORM_DRIVER) && \
+	!defined(S5P_PLATFORM_DRIVER) && \
 	!defined(EP93XX_PLATFORM_DRIVER) && \
 	!defined(AT91_PLATFORM_DRIVER) && \
 	!defined(NXP_PLATFORM_DRIVER) && \
@@ -1295,6 +1302,12 @@ static int __init ohci_hcd_mod_init(void)
 		goto error_s3c2410;
 #endif
 
+#ifdef S5P_PLATFORM_DRIVER
+	retval = platform_driver_register(&S5P_PLATFORM_DRIVER);
+	if (retval < 0)
+		goto error_s5p;
+#endif
+
 #ifdef EXYNOS_PLATFORM_DRIVER
 	retval = platform_driver_register(&EXYNOS_PLATFORM_DRIVER);
 	if (retval < 0)
@@ -1353,6 +1366,10 @@ static int __init ohci_hcd_mod_init(void)
 #ifdef EP93XX_PLATFORM_DRIVER
 	platform_driver_unregister(&EP93XX_PLATFORM_DRIVER);
  error_ep93xx:
+#endif
+#ifdef S5P_PLATFORM_DRIVER
+	platform_driver_unregister(&S5P_PLATFORM_DRIVER);
+ error_s5p:
 #endif
 #ifdef EXYNOS_PLATFORM_DRIVER
 	platform_driver_unregister(&EXYNOS_PLATFORM_DRIVER);
@@ -1425,6 +1442,9 @@ static void __exit ohci_hcd_mod_exit(void)
 #endif
 #ifdef EP93XX_PLATFORM_DRIVER
 	platform_driver_unregister(&EP93XX_PLATFORM_DRIVER);
+#endif
+#ifdef S5P_PLATFORM_DRIVER
+	platform_driver_unregister(&S5P_PLATFORM_DRIVER);
 #endif
 #ifdef EXYNOS_PLATFORM_DRIVER
 	platform_driver_unregister(&EXYNOS_PLATFORM_DRIVER);

@@ -50,6 +50,7 @@
 #include <plat/adc.h>
 #include <linux/platform_data/ata-samsung_cf.h>
 #include <linux/platform_data/usb-ehci-s5p.h>
+#include <linux/platform_data/usb-ohci-s5p.h>	/* add by huang */
 #include <plat/fb.h>
 #include <plat/fb-s3c2410.h>
 #include <plat/hdmi.h>
@@ -1373,12 +1374,46 @@ void __init s3c24xx_udc_set_platdata(struct s3c2410_udc_mach_info *pd)
 }
 #endif /* CONFIG_PLAT_S3C24XX */
 
+/* USB OHCI Host Controller */
+
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+static struct resource s5p_ohci_resource[] = {  
+    [0] = DEFINE_RES_MEM(0xEC300000, SZ_256),  
+    [1] = DEFINE_RES_IRQ(S5P_IRQ_VIC1(23)),  
+};  
+  
+struct platform_device s5p_device_ohci = {  
+    .name       = "s5p-ohci",  
+    .id     = -1,  
+    .num_resources  = ARRAY_SIZE(s5p_ohci_resource),  
+    .resource   = s5p_ohci_resource,  
+    .dev        = {  
+        .dma_mask       = &samsung_device_dma_mask,  
+        .coherent_dma_mask  = DMA_BIT_MASK(32),  
+    }  
+};  
+  
+void __init s5p_ohci_set_platdata(struct s5p_ohci_platdata *pd)  
+{  
+    struct s5p_ohci_platdata *npd;  
+  
+    npd = s3c_set_platdata(pd, sizeof(struct s5p_ohci_platdata),  
+            &s5p_device_ohci);  
+  
+    if (!npd->phy_init)  
+        npd->phy_init = s5p_usb_phy_init;  
+    if (!npd->phy_exit)  
+        npd->phy_exit = s5p_usb_phy_exit;  
+}  
+#endif /* CONFIG_S5P_DEV_USB_OHCI */ 
+
 /* USB EHCI Host Controller */
 
+/* add by huang */
 #ifdef CONFIG_S5P_DEV_USB_EHCI
 static struct resource s5p_ehci_resource[] = {
-	[0] = DEFINE_RES_MEM(S5P_PA_EHCI, SZ_256),
-	[1] = DEFINE_RES_IRQ(IRQ_USB_HOST),
+	[0] = DEFINE_RES_MEM(S5PV210_PA_USB_EHCI, SZ_1M),
+	[1] = DEFINE_RES_IRQ(IRQ_UHOST),
 };
 
 struct platform_device s5p_device_ehci = {

@@ -1,0 +1,543 @@
+Running OS 'LINUX'
+Loading kernel...
+file: /images/Linux/zImage: 4 MB(4811576 Byte)
+Load kernel succeed
+Start Linux kernel...
+Uncompressing Linux... done, booting the kernel.
+[    0.000000] Initializing cgroup subsys cpu
+[    0.000000] Linux version 3.0.8-FriendlyARM (root@jensen) (gcc version 4.5.1 (ctng-1.8.1-FA) ) #1 PREEMPT Mon Jan 21 16:45:14 HKT 2013
+[    0.000000] CPU: ARMv7 Processor [412fc082] revision 2 (ARMv7), cr=10c53c7f
+[    0.000000] CPU: VIPT nonaliasing data cache, VIPT aliasing instruction cache
+[    0.000000] Machine: MINI210
+[    0.000000] MINI210: S70 selected
+[    0.000000] Memory policy: ECC disabled, Data cache writeback
+[    0.000000] CPU S5PV210/S5PC110 (id 0x43110220)
+[    0.000000] S3C24XX Clocks, Copyright 2004 Simtec Electronics
+[    0.000000] S5PV210: PLL settings, A=1000000000, M=667000000, E=80000000 V=54000000
+[    0.000000] S5PV210: ARMCLK=1000000000, HCLKM=200000000, HCLKD=166750000
+[    0.000000] HCLKP=133400000, PCLKM=100000000, PCLKD=83375000, PCLKP=66700000
+[    0.000000] sclk_dmc: source is sclk_a2m (0), rate is 200000000
+[    0.000000] sclk_onenand: source is hclk_dsys (1), rate is 166750000
+[    0.000000] uclk1: source is mout_mpll (6), rate is 66700000
+[    0.000000] uclk1: source is mout_mpll (6), rate is 66700000
+[    0.000000] uclk1: source is mout_mpll (6), rate is 66700000
+[    0.000000] uclk1: source is mout_mpll (6), rate is 66700000
+[    0.000000] sclk_mixer: source is sclk_dac (0), rate is 54000000
+[    0.000000] sclk_fimc: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_fimc: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_fimc: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_cam0: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_cam1: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_fimd: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_mmc: source is mout_epll (7), rate is 80000000
+[    0.000000] sclk_mmc: source is mout_epll (7), rate is 80000000
+[    0.000000] sclk_mmc: source is mout_epll (7), rate is 80000000
+[    0.000000] sclk_mmc: source is mout_epll (7), rate is 80000000
+[    0.000000] sclk_mfc: source is sclk_a2m (0), rate is 200000000
+[    0.000000] sclk_g2d: source is sclk_a2m (0), rate is 200000000
+[    0.000000] sclk_g3d: source is sclk_a2m (0), rate is 200000000
+[    0.000000] sclk_csis: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_spi: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_spi: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_pwi: source is ext_xtal (0), rate is 24000000
+[    0.000000] sclk_pwm: source is ext_xtal (0), rate is 24000000
+[    0.000000] s5p: 36864 kbytes system memory reserved for mfc at 0x2dc00000, 0-bank base(0x2dc00000)
+[    0.000000] s5p: 36864 kbytes system memory reserved for mfc at 0x3dbf6000, 1-bank base(0x3dbf6000)
+[    0.000000] s5p: 6144 kbytes system memory reserved for fimc0 at 0x3d5f6000, 1-bank base(0x3d5f6000)
+[    0.000000] s5p: 16 kbytes system memory reserved for fimc1 at 0x3d5f2000, 1-bank base(0x3d5f2000)
+[    0.000000] s5p: 6144 kbytes system memory reserved for fimc2 at 0x3cff2000, 1-bank base(0x3cff2000)
+[    0.000000] s5p: 8192 kbytes system memory reserved for jpeg at 0x2d400000, 0-bank base(0x2d400000)
+[    0.000000] s5p: 13060 kbytes system memory reserved for fimd at 0x3c331000, 1-bank base(0x3c331000)
+[    0.000000] s5p: 8192 kbytes system memory reserved for g2d at 0x2cc00000, 0-bank base(0x2cc00000)
+[    0.000000] Built 1 zonelists in Zone order, mobility grouping on.  Total pages: 101179
+[    0.000000] Kernel command line: root=/dev/mmcblk0p2 rootfstype=ext3 console=ttySAC0,115200 init=/linuxrc androidboot.console=ttySAC0 gs=0 lcd=S70
+[    0.000000] PID hash table entries: 2048 (order: 1, 8192 bytes)
+[    0.000000] Dentry cache hash table entries: 65536 (order: 6, 262144 bytes)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 5, 131072 bytes)
+[    0.000000] Memory: 204MB 195MB 0MB = 399MB total
+[    0.000000] Memory: 394592k/510068k available, 14220k reserved, 0K highmem
+[    0.000000] Virtual kernel memory layout:
+[    0.000000]     vector  : 0xffff0000 - 0xffff1000   (   4 kB)
+[    0.000000]     fixmap  : 0xfff00000 - 0xfffe0000   ( 896 kB)
+[    0.000000]     DMA     : 0xff000000 - 0xffe00000   (  14 MB)
+[    0.000000]     vmalloc : 0xe0800000 - 0xfd000000   ( 456 MB)
+[    0.000000]     lowmem  : 0xc0000000 - 0xe0000000   ( 512 MB)
+[    0.000000]     modules : 0xbf000000 - 0xc0000000   (  16 MB)
+[    0.000000]       .init : 0xc0008000 - 0xc0174000   (1456 kB)
+[    0.000000]       .text : 0xc0174000 - 0xc08caee0   (7516 kB)
+[    0.000000]       .data : 0xc08cc000 - 0xc0923f40   ( 352 kB)
+[    0.000000]        .bss : 0xc0923f64 - 0xc0969420   ( 278 kB)
+[    0.000000] SLUB: Genslabs=11, HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] Preemptible hierarchical RCU implementation.
+[    0.000000] NR_IRQS:393
+[    0.000000] VIC @fd000000: id 0x00041192, vendor 0x41
+[    0.000000] VIC @fd010000: id 0x00041192, vendor 0x41
+[    0.000000] VIC @fd020000: id 0x00041192, vendor 0x41
+[    0.000000] VIC @fd030000: id 0x00041192, vendor 0x41
+[    0.000000] sched_clock: 32 bits at 33MHz, resolution 29ns, wraps every 128784ms
+[    0.000000] Console: colour dummy device 80x30
+[    0.000000] console [ttySAC0] enabled
+[    0.434371] Calibrating delay loop... 997.78 BogoMIPS (lpj=2494464)
+[    0.464999] pid_max: default: 32768 minimum: 301
+[    0.465159] Mount-cache hash table entries: 512
+[    0.465491] Initializing cgroup subsys debug
+[    0.465533] Initializing cgroup subsys cpuacct
+[    0.465579] Initializing cgroup subsys freezer
+[    0.467599] CPU: Testing write buffer coherency: ok
+[    0.475195] print_constraints: dummy: 
+[    0.476283] NET: Registered protocol family 16
+[    0.485771] S3C Power Management, Copyright 2004 Simtec Electronics
+[    0.492301] fimd at 0x3c331000
+[    0.492381] hsmmc0: sclk_mmc: source is mout_mpll, rate is 47642857
+[    0.496132] hsmmc1: sclk_mmc: source is mout_mpll, rate is 47642857
+[    0.502426] hsmmc2: sclk_mmc: source is mout_mpll, rate is 47642857
+[    0.508598] hsmmc3: sclk_mmc: source is mout_mpll, rate is 47642857
+[    0.515635] S5PV210: Initializing architecture
+[    0.519873] s3c-adc s5pv210-adc: attached adc driver
+[    0.524346] s3c24xx-pwm s3c24xx-pwm.0: tin at 33350000, tdiv at 33350000, tin=divclk, base 0
+[    0.532979] print_constraints: pd_tv_supply: 5000 mV normal 
+[    0.538383] print_constraints: pd_lcd_supply: 5000 mV normal 
+[    0.544107] print_constraints: pd_g3d_supply: 5000 mV normal 
+[    0.549807] print_constraints: pd_mfc_supply: 5000 mV normal 
+[    0.555534] print_constraints: pd_audio_supply: 5000 mV normal 
+[    0.592490] bio: create slab <bio-0> at 0
+[    0.593460] SCSI subsystem initialized
+[    0.595303] usbcore: registered new interface driver usbfs
+[    0.595596] usbcore: registered new interface driver hub
+[    0.595789] usbcore: registered new device driver usb
+[    0.596340] s3c-i2c s3c2440-i2c.0: slave address 0x10
+[    0.598744] s3c-i2c s3c2440-i2c.0: bus frequency set to 378 KHz
+[    0.605492] s3c-i2c s3c2440-i2c.0: i2c-0: S3C I2C adapter
+[    0.610077] s3c-i2c s3c2440-i2c.1: slave address 0x10
+[    0.615061] s3c-i2c s3c2440-i2c.1: bus frequency set to 65 KHz
+[    0.621109] s3c-i2c s3c2440-i2c.1: i2c-1: S3C I2C adapter
+[    0.626273] s3c-i2c s3c2440-i2c.2: slave address 0x10
+[    0.631258] s3c-i2c s3c2440-i2c.2: bus frequency set to 378 KHz
+[    0.637509] s3c-i2c s3c2440-i2c.2: i2c-2: S3C I2C adapter
+[    0.643068] Advanced Linux Sound Architecture Driver Version 1.0.24.
+[    0.649388] Bluetooth: Core ver 2.16
+[    0.652529] NET: Registered protocol family 31
+[    0.656841] Bluetooth: HCI device and connection manager initialized
+[    0.663149] Bluetooth: HCI socket layer initialized
+[    0.667992] Bluetooth: L2CAP socket layer initialized
+[    0.673016] Bluetooth: SCO socket layer initialized
+[    0.678106] Switching to clocksource s5p_clocksource_timer
+[    0.684997] Switched to NOHz mode on CPU #0
+[    0.697268] NET: Registered protocol family 2
+[    0.697461] IP route cache hash table entries: 4096 (order: 2, 16384 bytes)
+[    0.699727] TCP established hash table entries: 16384 (order: 5, 131072 bytes)
+[    0.706217] TCP bind hash table entries: 16384 (order: 6, 327680 bytes)
+[    0.712832] TCP: Hash tables configured (established 16384 bind 16384)
+[    0.719039] TCP reno registered
+[    0.722144] UDP hash table entries: 256 (order: 1, 12288 bytes)
+[    0.728061] UDP-Lite hash table entries: 256 (order: 1, 12288 bytes)
+[    0.734579] NET: Registered protocol family 1
+[    0.738944] RPC: Registered named UNIX socket transport module.
+[    0.744639] RPC: Registered udp transport module.
+[    0.749275] RPC: Registered tcp transport module.
+[    0.753954] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    0.769541] NetWinder Floating Point Emulator V0.97 (double precision)
+[    0.769675] PMU: registered new PMU device of type 0
+[    0.772107] cpuidle: phy_regs_save:0x3bf3e000
+[    0.776376] Loaded driver for PL330 DMAC-0 s3c-pl330
+[    0.781085]  DBUFF-64x8bytes Num_Chans-8 Num_Peri-2 Num_Events-32
+[    0.787217] Loaded driver for PL330 DMAC-1 s3c-pl330
+[    0.792087]  DBUFF-8x4bytes Num_Chans-8 Num_Peri-32 Num_Events-32
+[    0.798235] Loaded driver for PL330 DMAC-2 s3c-pl330
+[    0.803093]  DBUFF-8x4bytes Num_Chans-8 Num_Peri-32 Num_Events-32
+[    0.817251] ashmem: initialized
+[    0.831188] NTFS driver 2.1.30 [Flags: R/W].
+[    0.831694] ROMFS MTD (C) 2007 Red Hat, Inc.
+[    0.831959] msgmni has been set to 770
+[    0.832947] io scheduler noop registered
+[    0.832983] io scheduler deadline registered
+[    0.833067] io scheduler cfq registered (default)
+[    0.837368] start plist test
+[    0.844974] end plist test
+[    0.845753] s3cfb s3cfb: win 2: pmem_start=0x3c796000
+[    0.847882] s3cfb s3cfb: [fb2] dma: 0x3c796000, cpu: 0xe1000000, size: 0x0085c000
+[    0.866880] Console: switching to colour frame buffer device 100x30
+[    0.871961] FIMD src sclk = 166750000
+[    0.872031] s3cfb s3cfb: registered successfully
+[    0.872072] Start display and show logo
+[    0.878986] s5pv210-uart.0: ttySAC0 at MMIO 0xe2900000 (irq = 16) is a S3C6400/10
+[    0.883624] s5pv210-uart.1: ttySAC1 at MMIO 0xe2900400 (irq = 20) is a S3C6400/10
+[    0.898399] s5pv210-uart.2: ttySAC2 at MMIO 0xe2900800 (irq = 24) is a S3C6400/10
+[    0.908398] s5pv210-uart.3: ttySAC3 at MMIO 0xe2900c00 (irq = 28) is a S3C6400/10
+[    0.918855] leds     initialized
+[    0.919018] buttons  initialized
+[    0.919202] pwm      initialized
+[    0.919396] mini210-adc      initialized
+[    0.919689] backlight        initialized
+[    0.920520] PA FB = 0x3C796000, bits per pixel = 32
+[    0.923833] screen width=800 height=480 va=0xdc796000 pa=0x3c796000
+[    0.930099] xres_virtual = 800, yres_virtual = 1440, xoffset = 0, yoffset = 0
+[    0.937150] fb_size=8765440
+[    0.939934] Back frameBuffer[0].VAddr=dc90d000 PAddr=3c90d000 size=1536000
+[    0.946770] Back frameBuffer[1].VAddr=dca84000 PAddr=3ca84000 size=1536000
+[    0.953622] Video Y Buffer[0].VAddr=dcbfb000 PAddr=3cbfb000 size=921600
+[    0.960201] Video Y Buffer[1].VAddr=dccdc000 PAddr=3ccdc000 size=921600
+[    0.966785] Video Y Buffer[2].VAddr=dcdbd000 PAddr=3cdbd000 size=921600
+[    0.973371] Video UV Buffer[0].VAddr=dce9e000 PAddr=3ce9e000 size=462848
+[    0.980046] Video UV Buffer[1].VAddr=dcf0f000 PAddr=3cf0f000 size=462848
+[    0.986715] Video UV Buffer[2].VAddr=dcf80000 PAddr=3cf80000 size=462848
+[    0.999815] brd: module loaded
+[    1.003071] loop: module loaded
+[    1.004482] S3C NAND Driver, (c) 2008 Samsung Electronics
+[    1.136133] S3C NAND Driver is using hardware ECC.
+[    1.136212] NAND device: Manufacturer ID: 0xec, Chip ID: 0xdc (Samsung NAND 512MiB 3,3V 8-bit)
+[    1.136291] Creating 5 MTD partitions on "s5pv210-nand":
+[    1.136343] 0x0000000c0000-0x000000100000 : "misc"
+[    1.138329] 0x000000100000-0x000000600000 : "recovery"
+[    1.145010] 0x000000600000-0x000000b00000 : "kernel"
+[    1.149877] 0x000000b00000-0x000000e00000 : "ramdisk"
+[    1.154238] 0x000000e00000-0x000020000000 : "system"
+[    1.335146] PPP generic driver version 2.4.2
+[    1.335474] PPP Deflate Compression module registered
+[    1.335519] PPP BSD Compression module registered
+[    1.335980] PPP MPPE Compression module registered
+[    1.336025] NET: Registered protocol family 24
+[    1.337473] tun: Universal TUN/TAP device driver, 1.6
+[    1.341094] tun: (C) 1999-2004 Max Krasnyansky <maxk@qualcomm.com>
+[    1.347470] dm9000 Ethernet Driver, V1.31
+[    1.352408] eth0: dm9000a at e0838000,e083c00c IRQ 39 MAC: 08:90:00:a0:02:10 (platform data)
+[    1.359856] sdhci: Secure Digital Host Controller Interface driver
+[    1.365794] sdhci: Copyright(c) Pierre Ossman
+[    1.370163] s3c-sdhci s3c-sdhci.0: clock source 0: hsmmc (133400000 Hz)
+[    1.376696] s3c-sdhci s3c-sdhci.0: clock source 2: sclk_mmc (47642857 Hz)
+[    1.383498] mmc0: no vmmc regulator found
+[    1.387706] mmc0: SDHCI controller on samsung-hsmmc [s3c-sdhci.0] using ADMA
+[    1.394516] s3c-sdhci s3c-sdhci.1: clock source 0: hsmmc (133400000 Hz)
+[    1.401050] s3c-sdhci s3c-sdhci.1: clock source 2: sclk_mmc (47642857 Hz)
+[    1.407824] mmc1: no vmmc regulator found
+[    1.414130] mmc1: SDHCI controller on samsung-hsmmc [s3c-sdhci.1] using ADMA
+[    1.418853] s3c-sdhci s3c-sdhci.2: clock source 0: hsmmc (133400000 Hz)
+[    1.425395] s3c-sdhci s3c-sdhci.2: clock source 2: sclk_mmc (47642857 Hz)
+[    1.432197] mmc2: no vmmc regulator found
+[    1.436423] mmc2: SDHCI controller on samsung-hsmmc [s3c-sdhci.2] using ADMA
+[    1.444243] s3c-sdhci s3c-sdhci.3: clock source 0: hsmmc (133400000 Hz)
+[    1.451758] s3c-sdhci s3c-sdhci.3: clock source 2: sclk_mmc (47642857 Hz)
+[    1.456543] mmc3: no vmmc regulator found
+[    1.460796] mmc3: SDHCI controller on samsung-hsmmc [s3c-sdhci.3] using ADMA
+[    1.467634] ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+[    1.474230] s5p-ehci s5p-ehci: S5P EHCI Host Controller
+[    1.479278] s5p-ehci s5p-ehci: new USB bus registered, assigned bus number 1
+[    1.486322] s5p-ehci s5p-ehci: irq 87, io mem 0xec200000
+[    1.498372] s5p-ehci s5p-ehci: USB 0.0 started, EHCI 1.00
+[    1.498977] hub 1-0:1.0: USB hub found
+[    1.500598] hub 1-0:1.0: 1 port detected
+[    1.504924] ohci_hcd: USB 1.1 'Open' Host Controller (OHCI) Driver
+[    1.510793] s5p-ohci s5p-ohci: EXYNOS OHCI Host Controller
+[    1.516167] s5p-ohci s5p-ohci: new USB bus registered, assigned bus number 2
+[    1.523176] s5p-ohci s5p-ohci: irq 87, io mem 0xec300000
+[    1.539965] mmc0: new high speed SD card at address 1234
+[    1.540293] mmcblk0: mmc0:1234 SA02G 1.83 GiB 
+[    1.542055]  mmcblk0: p1 p2
+[    1.589979] hub 2-0:1.0: USB hub found
+[    1.590028] hub 2-0:1.0: 1 port detected
+[    1.590802] usbcore: registered new interface driver usbserial
+[    1.590981] USB Serial support registered for generic
+[    1.591171] usbcore: registered new interface driver usbserial_generic
+[    1.592674] usbserial: USB Serial Driver core
+[    1.597154] USB Serial support registered for aircable
+[    1.602309] usbcore: registered new interface driver aircable
+[    1.611162] USB Serial support registered for ark3116
+[    1.613003] usbcore: registered new interface driver ark3116
+[    1.618534] ark3116:v0.6:USB ARK3116 serial/IrDA driver
+[    1.625834] USB Serial support registered for Belkin / Peracom / GoHubs USB Serial Adapter
+[    1.632082] usbcore: registered new interface driver belkin
+[    1.637512] belkin_sa: v1.3:USB Belkin Serial converter driver
+[    1.646536] USB Serial support registered for ch341-uart
+[    1.648734] usbcore: registered new interface driver ch341
+[    1.654160] USB Serial support registered for cp210x
+[    1.661167] usbcore: registered new interface driver cp210x
+[    1.664554] cp210x: v0.09:Silicon Labs CP210x RS232 serial adaptor driver
+[    1.671387] USB Serial support registered for Reiner SCT Cyberjack USB card reader
+[    1.682093] usbcore: registered new interface driver cyberjack
+[    1.684636] cyberjack: v1.01 Matthias Bruestle
+[    1.689102] cyberjack: REINER SCT cyberJack pinpad/e-com USB Chipcard Reader Driver
+[    1.698803] USB Serial support registered for DeLorme Earthmate USB
+[    1.703022] USB Serial support registered for HID->COM RS232 Adapter
+[    1.709394] USB Serial support registered for Nokia CA-42 V2 Adapter
+[    1.715728] usbcore: registered new interface driver cypress
+[    1.721239] cypress_m8: v1.10:Cypress USB to Serial Driver
+[    1.727780] USB Serial support registered for Digi 2 port USB adapter
+[    1.735218] USB Serial support registered for Digi 4 port USB adapter
+[    1.739638] usbcore: registered new interface driver digi_acceleport
+[    1.745845] digi_acceleport: v1.80.1.2:Digi AccelePort USB-2/USB-4 Serial Converter driver
+[    1.754153] USB Serial support registered for Edgeport 2 port adapter
+[    1.760583] USB Serial support registered for Edgeport 4 port adapter
+[    1.767156] USB Serial support registered for Edgeport 8 port adapter
+[    1.773436] USB Serial support registered for EPiC device
+[    1.778811] usbcore: registered new interface driver io_edgeport
+[    1.784673] io_edgeport: v2.7:Edgeport USB Serial Driver
+[    1.790039] USB Serial support registered for Edgeport TI 1 port adapter
+[    1.796734] USB Serial support registered for Edgeport TI 2 port adapter
+[    1.803431] usbcore: registered new interface driver io_ti
+[    1.810752] io_ti: v0.7mode043006:Edgeport USB Serial Driver
+[    1.814457] USB Serial support registered for empeg
+[    1.819237] usb 1-1: new high speed USB device number 2 using s5p-ehci
+[    1.825891] usbcore: registered new interface driver empeg
+[    1.831235] empeg: v1.3:USB Empeg Mark I/II Driver
+[    1.837062] USB Serial support registered for FTDI USB Serial Device
+[    1.844518] usbcore: registered new interface driver ftdi_sio
+[    1.848004] ftdi_sio: v1.6.0:USB FTDI Serial Converters Driver
+[    1.853909] USB Serial support registered for funsoft
+[    1.858987] usbcore: registered new interface driver funsoft
+[    1.864579] USB Serial support registered for Garmin GPS usb/tty
+[    1.870586] usbcore: registered new interface driver garmin_gps
+[    1.876355] garmin_gps: v0.36:garmin gps driver
+[    1.880940] USB Serial support registered for hp4X
+[    1.885923] usbcore: registered new interface driver hp4X
+[    1.891002] hp4x: v1.00:HP4x (48/49) Generic Serial driver
+[    1.896542] USB Serial support registered for PocketPC PDA
+[    1.902076] usbcore: registered new interface driver ipaq
+[    1.907278] ipaq: v1.0:USB PocketPC PDA driver
+[    1.913799] USB Serial support registered for IPWireless converter
+[    1.917954] usbcore: registered new interface driver ipwtty
+[    1.923377] ipw: v0.4:IPWireless tty driver
+[    1.927615] USB Serial support registered for IR Dongle
+[    1.932891] usbcore: registered new interface driver ir-usb
+[    1.938310] ir_usb: v0.5:USB IR Dongle driver
+[    1.943810] USB Serial support registered for iuu_phoenix
+[    1.950137] usbcore: registered new interface driver iuu_phoenix
+[    1.954000] iuu_phoenix: v0.12:Infinity USB Unlimited Phoenix driver
+[    1.960403] USB Serial support registered for Keyspan PDA
+[    1.965853] USB Serial support registered for Keyspan PDA - (prerenumeration)
+[    1.973173] USB Serial support registered for Xircom / Entregra PGS - (prerenumeration)
+[    1.981176] hub 1-1:1.0: USB hub found
+[    1.984563] usbcore: registered new interface driver keyspan_pda
+[    1.990492] hub 1-1:1.0: 4 ports detected
+[    1.994483] keyspan_pda: v1.1:USB Keyspan PDA Converter driver
+[    2.000462] USB Serial support registered for KL5KUSB105D / PalmConnect
+[    2.007070] usbcore: registered new interface driver kl5kusb105d
+[    2.012847] kl5kusb105: v0.4:KLSI KL5KUSB105 chipset USB->Serial Converter driver
+[    2.022606] USB Serial support registered for KOBIL USB smart card terminal
+[    2.027341] usbcore: registered new interface driver kobil
+[    2.032683] kobil_sct: 21/05/2004:KOBIL USB Smart Card Terminal Driver (experimental)
+[    2.040563] USB Serial support registered for MCT U232
+[    2.045716] usbcore: registered new interface driver mct_u232
+[    2.052313] mct_u232: z2.1:Magic Control Technology USB-RS232 converter driver
+[    2.060608] USB Serial support registered for Moschip 2 port adapter
+[    2.064835] mos7720: 2.1:Moschip USB Serial Driver
+[    2.069702] usbcore: registered new interface driver moschip7720
+[    2.075680] USB Serial support registered for Moschip 7840/7820 USB Serial Driver
+[    2.083032] mos7840: 1.3.2:Moschip 7840/7820 USB Serial Driver
+[    2.088944] usbcore: registered new interface driver mos7840
+[    2.094572] USB Serial support registered for moto-modem
+[    2.099876] usbcore: registered new interface driver moto-modem
+[    2.105750] USB Serial support registered for navman
+[    2.110709] usbcore: registered new interface driver navman
+[    2.116257] USB Serial support registered for ZyXEL - omni.net lcd plus usb
+[    2.123228] usbcore: registered new interface driver omninet
+[    2.130752] omninet: v1.1:USB ZyXEL omni.net LCD PLUS Driver
+[    2.134456] USB Serial support registered for opticon
+[    2.139464] usbcore: registered new interface driver opticon
+[    2.145106] USB Serial support registered for GSM modem (1-port)
+[    2.151182] usbcore: registered new interface driver option
+[    2.157521] option: v0.7.2:USB Driver for GSM modems
+[    2.163552] USB Serial support registered for oti6858
+[    2.166583] usbcore: registered new interface driver oti6858
+[    2.172204] USB Serial support registered for pl2303
+[    2.177178] usbcore: registered new interface driver pl2303
+[    2.182594] pl2303: Prolific PL2303 USB to serial adaptor driver
+[    2.188667] USB Serial support registered for qcaux
+[    2.193597] usbcore: registered new interface driver qcaux
+[    2.198988] USB Serial support registered for Qualcomm USB modem
+[    2.205008] usbcore: registered new interface driver qcserial
+[    2.210598] safe_serial: v0.1:USB Safe Encapsulated Serial
+[    2.216138] USB Serial support registered for safe_serial
+[    2.221539] usbcore: registered new interface driver safe_serial
+[    2.227488] USB Serial support registered for siemens_mpi
+[    2.234896] usbcore: registered new interface driver siemens_mpi
+[    2.238738] Driver for Siemens USB/MPI adapter
+[    2.243119] Version 0.1 09/26/2005 Thomas Hergenhahn@web.de http://libnodave.sf.net
+[    2.250877] USB Serial support registered for Sierra USB modem
+[    2.256737] usbcore: registered new interface driver sierra
+[    2.263166] sierra: v.1.7.16:USB Driver for Sierra Wireless USB modems
+[    2.270733] USB Serial support registered for SPCP8x5
+[    2.273798] usbcore: registered new interface driver spcp8x5
+[    2.279310] spcp8x5: v0.10:SPCP8x5 USB to serial adaptor driver
+[    2.285282] USB Serial support registered for Quatech SSU-100 USB to Serial Driver
+[    2.292866] usbcore: registered new interface driver ssu100
+[    2.298414] ssu100: v0.1:Quatech SSU-100 USB to Serial Driver
+[    2.304089] USB Serial support registered for symbol
+[    2.309071] usbcore: registered new interface driver symbol
+[    2.314593] USB Serial support registered for TI USB 3410 1 port adapter
+[    2.321269] USB Serial support registered for TI USB 5052 2 port adapter
+[    2.327969] usbcore: registered new interface driver ti_usb_3410_5052
+[    2.334237] ti_usb_3410_5052: v0.10:TI USB 3410/5052 Serial Driver
+[    2.342487] USB Serial support registered for Handspring Visor / Palm OS
+[    2.347159] USB Serial support registered for Sony Clie 3.5
+[    2.352703] USB Serial support registered for Sony Clie 5.0
+[    2.358292] usbcore: registered new interface driver visor
+[    2.363629] visor: USB HandSpring Visor / Palm OS driver
+[    2.369998] USB Serial support registered for Connect Tech - WhiteHEAT - (prerenumeration)
+[    2.379258] USB Serial support registered for Connect Tech - WhiteHEAT
+[    2.383765] usbcore: registered new interface driver whiteheat
+[    2.389450] whiteheat: v2.0:USB ConnectTech WhiteHEAT driver
+[    2.395264] USB Serial support registered for vivopay-serial
+[    2.400834] usbcore: registered new interface driver vivopay-serial
+[    2.406952] vivopay_serial: v1.0:ViVOpay USB Serial Driver
+[    2.412498] USB Serial support registered for zio
+[    2.417200] usbcore: registered new interface driver zio
+[    2.422378] Initializing USB Mass Storage driver...
+[    2.427391] usbcore: registered new interface driver usb-storage
+[    2.433216] USB Mass Storage support registered.
+[    2.437947] s3c-udc : S3C HS USB Device Controller Driver, (c) 2008-2009 Samsung Electronics
+[    2.437954] s3c-udc : version 15 March 2009 (DMA Mode)
+[    2.455607] android_usb gadget: Mass Storage Function, version: 2009/09/11
+[    2.458116] android_usb gadget: Number of LUNs=1
+[    2.462772]  lun0: LUN: removable file: (no medium)
+[    2.467963] android_usb gadget: android_usb ready
+[    2.489474] Registered gadget driver 'android_usb'
+[    2.489812] mousedev: PS/2 mouse device common for all mice
+[    2.490329] touchscreen-1wire        initialized
+[    2.490365] backlight-1wire  initialized
+[    2.490447] setup_irq: ret = 0
+[    2.493539] PWM clock = 66700000
+[    2.496592] TCNT_FOR_SAMPLE_BIT = 3472, TCFG1 = 00000003
+[    2.502283] input: fa_ts_input as /devices/virtual/input/input0
+[    2.508271] ts-if    initialized
+[    2.511044] S3C24XX RTC, (c) 2004,2006 Simtec Electronics
+[    2.516235] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.521570] 2: TCNTB=00000d90, TCNTO=000004ec, TINT_CSTAT=0000000c
+[    2.527733] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.533210] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.538638] 4: TCNTB=00000d90, TCNTO=00000626, TINT_CSTAT=0000000c
+[    2.544797] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.550255] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.556098] using rtc device, s3c, for alarms
+[    2.559911] s3c-rtc s3c64xx-rtc: rtc core: registered s3c as rtc0
+[    2.566226] i2c /dev entries driver
+[    2.570223] Linux video capture interface: v2.00
+[    2.574283] mfc_init: <6>S5PC110 MFC Driver, (c) 2009 Samsung Electronics
+[    2.574289] 
+[    2.585158] S3C JPEG Driver, (c) 2007 Samsung Electronics
+[    2.587761] JPEG driver for S5PV210
+[    2.591799] i2c i2c-1: attached s5p_ddc into i2c adapter successfully
+[    2.597903] S5PC11X HPD Driver, (c) 2010 Samsung Electronics
+[    2.603669] S5PC11X CEC Driver, (c) 2010 Samsung Electronics
+[    2.609862] usbcore: registered new interface driver uvcvideo
+[    2.614671] USB Video Class driver (v1.1.0)
+[    2.661232] input: mma7660 as /devices/platform/s3c2440-i2c.0/i2c-0/0-004c/input/input1
+[    2.661518] mma7660 0-004c: MMA7660 device is probed successfully.
+[    2.661688] i2c-core: driver [mma7660] using legacy suspend method
+[    2.661744] i2c-core: driver [mma7660] using legacy resume method
+[    2.665362] MMA7660 sensor driver registered.
+[    2.669682] S3C2410 Watchdog Timer, (c) 2004 Simtec Electronics
+[    2.675797] s3c2410-wdt s3c2410-wdt: watchdog inactive, reset disabled, irq enabled
+[    2.684144] device-mapper: uevent: version 1.0.3
+[    2.688189] device-mapper: ioctl: 4.20.0-ioctl (2011-02-02) initialised: dm-devel@redhat.com
+[    2.696359] Bluetooth: HCI UART driver ver 2.2
+[    2.700636] Bluetooth: HCI H4 protocol initialized
+[    2.705375] Bluetooth: HCILL protocol initialized
+[    2.710196] cpuidle: using governor ladder
+[    2.714348] cpuidle: using governor menu
+[    2.724927] usbcore: registered new interface driver usbhid
+[    2.724978] usbhid: USB HID core driver
+[    2.728932] ALSA device list:
+[    2.730312]   No soundcards found.
+[    2.733732] oprofile: hardware counters not available
+[    2.738748] oprofile: using timer interrupt.
+[    2.743070] GACT probability NOT on
+[    2.746467] Mirror/redirect action on
+[    2.750089] u32 classifier
+[    2.752759]     Actions configured
+[    2.756153] Netfilter messages via NETLINK v0.30.
+[    2.760890] nf_conntrack version 0.5.0 (6165 buckets, 24660 max)
+[    2.767679] ctnetlink v0.93: registering with nfnetlink.
+[    2.772167] NF_TPROXY: Transparent proxy support initialized, version 4.1.0
+[    2.779038] NF_TPROXY: Copyright (c) 2006-2007 BalaBit IT Ltd.
+[    2.785197] xt_time: kernel timezone is -0000
+[    2.790729] ip_tables: (C) 2000-2006 Netfilter Core Team
+[    2.794734] arp_tables: (C) 2002 David S. Miller
+[    2.799115] TCP cubic registered
+[    2.803195] NET: Registered protocol family 10
+[    2.811374] Mobile IPv6
+[    2.811426] ip6_tables: (C) 2000-2006 Netfilter Core Team
+[    2.814706] IPv6 over IPv4 tunneling driver
+[    2.823145] NET: Registered protocol family 17
+[    2.823208] NET: Registered protocol family 15
+[    2.827568] Bluetooth: RFCOMM TTY layer initialized
+[    2.832379] Bluetooth: RFCOMM socket layer initialized
+[    2.837440] Bluetooth: RFCOMM ver 1.11
+[    2.841165] Bluetooth: BNEP (Ethernet Emulation) ver 1.3
+[    2.846451] Bluetooth: HIDP (Human Interface Emulation) ver 1.2
+[    2.852572] NET: Registered protocol family 35
+[    2.856887] Registering the dns_resolver key type
+[    2.861508] VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+[    2.869074] ThumbEE CPU extension supported.
+[    2.873480] s5pv210_cpufreq_init: S5PV210 cpu-freq driver
+[    2.879286] regulator_init_complete: pd_mfc_supply: disabling
+[    2.884441] regulator_init_complete: pd_tv_supply: disabling
+[    2.890105] s3c-rtc s3c64xx-rtc: rtc disabled, re-enabling
+[    2.895639] s3c-rtc s3c64xx-rtc: setting system clock to 2012-01-01 12:00:00 UTC (1325419200)
+[    2.905440] FIMC0 registered successfully
+[    2.909307] FIMC1 registered successfully
+[    2.913210] FIMC2 registered successfully
+[    2.916065] S5PC1XX TVOUT Driver, (c) 2009 Samsung Electronics
+[    2.922271] s5p-tvout s5p-tvout: hpd status is cable removed
+[    2.933899] Freeing init memory: 1456K
+[    2.942227] EXT4-fs (mmcblk0p2): mounting ext3 file system using the ext4 subsystem
+[   10.709019] EXT4-fs (mmcblk0p2): recovery complete
+[   10.934339] EXT4-fs (mmcblk0p2): mounted filesystem with ordered data mode. Opts: 
+INIT: version 2.88 booting
+Using makefile-style concurrent boot in runlevel S.
+.udev/ already exists on the static /dev! ... (warning).
+Starting the hotplug events dispatcher: udevd.
+Synthesizing the initial hotplug events...done.
+Waiting for /dev to be fully populated...[   12.406108] vo_open::check tvout start !!
+[   12.407816] vo_open::check tvout start !!
+done.
+Activating swap...done.
+[   15.444676] EXT4-fs (mmcblk0p2): re-mounted. Opts: (null)
+Cleaning up ifupdown....
+Setting up networking....
+Loading kernel modules...done.
+Activating lvm and md swap...done.
+Checking file systems...fsck from util-linux-ng 2.17.2
+done.
+Mounting local filesystems...done.
+Activating swapfile swap...done.
+Cleaning up temporary files....
+Configuring network interfaces...Internet Systems Consortium DHCP Client 4.1.1-P1
+Copyright 2004-2010 Internet Systems Consortium.
+All rights reserved.
+For info, please visit https://www.isc.org/software/dhcp/
+
+[   16.143405] dm9000 dm9000: eth0: link down
+[   16.143632] ADDRCONF(NETDEV_UP): eth0: link is not ready
+Listening on LPF/eth0/08:90:00:a0:02:10
+Sending on   LPF/eth0/08:90:00:a0:02:10
+Sending on   Socket/fallback
+[   17.918574] ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+[   17.938385] dm9000 dm9000: eth0: link up, 100Mbps, full-duplex, lpa 0x4DE1
+DHCPREQUEST on eth0 to 255.255.255.255 port 67
+DHCPACK from 192.168.2.1
+bound to 192.168.2.237 -- renewal in 45898 seconds.
+done.
+Cleaning up temporary files....
+Setting up ALSA...warning: 'alsactl restore' failed with error message 'alsactl: load_state:1610: No soundcards found...'...done.
+Setting kernel variables ...done.
+INIT: Entering runlevel: 2
+Using makefile-style concurrent boot in runlevel 2.
+Starting enhanced syslogd: rsyslogd.
+Starting periodic command scheduler: cron.
+Starting system message bus: dbus.
+[   19.491048] asoc: wm8960-hifi <-> samsung-i2s.0 mapping ok
+
+Debian GNU/Linux 6.0 FriendlyARM ttySAC0
+
+FriendlyARM login: root
+Password: 
+Last login: Sun Jan  1 12:00:19 UTC 2012 on tty1
+Linux FriendlyARM 3.0.8-FriendlyARM #1 PREEMPT Mon Jan 21 16:45:14 HKT 2013 armv7l
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+root@FriendlyARM:~# [

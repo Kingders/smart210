@@ -387,6 +387,11 @@ config S5P_DEV_USB_EHCI
 	help
 	  Compile in platform device definition for USB EHCI
 
+config S5P_DEV_USB_OHCI  
+	bool  
+	help  
+	  Compile in platform device definition for USB OHCI  
+
 config S3C24XX_PWM
 	bool "PWM device support"
 	select PWM

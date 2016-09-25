@@ -1,6 +1,16 @@
 下载内核:
  wget https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.46.tar.xz 
 
+该内核暂时,只面向uboot1!! 和 nfs:rootfs/rootfs1
+
+/**************************** 最新状态 *********************************/
+uboot1 nfs 启动内核:
+uboot1:(nfs改到smart210/rootfs下) (pc的ip变了192.168.2.208)
+set bootargs noinitrd root=/dev/nfs nfsroot=192.168.2.208:/home/kingders/smart210/rootfs/rootfs1 ip=192.168.2.120:192.168.2.208:192.168.2.1:255.255.255.0::eth0:off console=ttySAC0,115200n8 mem=64m
+setenv bootmenu_0 "start0=tftp 20000000 uImage; bootm"
+set serverip 192.168.2.208
+set machid 998 
+saveenv
 
 /**************************** 裁剪 *********************************/
 arch/arm/只留下的mach-xx为mach-s5pv210,
@@ -2063,6 +2073,873 @@ QT运行时需要用到ibjpeg.so.8、libpng14.so.14 等一系列库。这些库�
 使用生成的qmake生成makefile
 make生成执行程序
 把执行程序拷贝到开发板执行，
+
+
+/**************************** usb host 2.0(ehci) 移植 (未成功) *********************************/
+
+make menuconfig
+选择各种usb选项,然而编译后无用
+
+后来发现:
+mach-smdkv210.c:static struct platform_device *smdkv210_devices[] __initdata = {
+添加	&s5p_device_ehci,
+编译失败, undefined reference to `s5p_device_ehci'
+
+后来再发现:
+arch/arm/mach-s5pv210/Kconfig:
+menu "S5PV210 Machines"
+config MACH_SMDKV210
+	bool "SMDKV210"
+添加:	select S5P_DEV_USB_EHCI
+编译失败:
+arch/arm/mach-s5pv210/mach-smdkv210.c:254:20: warning: 'smdkv210_dm9000_init' defined but not used
+arch/arm/plat-samsung/devs.c:1380:8: error: 'S5P_PA_EHCI' undeclared here (not in a function)
+arch/arm/plat-samsung/devs.c:1381:8: error: 'IRQ_USB_HOST' undeclared here (not in a function)
+make[1]: *** [arch/arm/plat-samsung/devs.o] Error 1
+查看:/home/kingders/smart210/kernel/kernel2/linux-3.10.102/arch/arm/mach-s5pv210/include/mach
+的map.h与irqs.h,并根据datasheet修改:
+S5P_PA_EHCI 是usb_host_ehci(usb2.0_host)模块的寄存器基地址 0xEC200000
+在map.h添加 #define S5PV210_PA_USB_EHCI     	0xEC200000
+IRQ_USB_HOST 是usb_host的外部中断. 对应vic1_23
+在irgs.好查到 #define IRQ_UHOST		S5P_IRQ_VIC1(23)
+最后修改devs.c:
+static struct resource s5p_ehci_resource[] = {
+	[0] = DEFINE_RES_MEM(S5PV210_PA_USB_EHCI, SZ_1M),
+	[1] = DEFINE_RES_IRQ(IRQ_UHOST),
+};
+修改后编译,然后打开板子,插入usb设备后,出现了
+usbcore: registered new interface driver usbhid
+usbhid: USB HID core driver
+TCP: cubic registered
+NET: Registered protocol family 17
+VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+unable to find transceiver of type USB2 PHY
+s5p-ehci s5p-ehci: no platform data or transceiver defined
+platform s5p-ehci: Driver s5p-ehci requests probe deferral
+仍未成功,先按网络移植ohci分析问题!!
+
+
+
+/**************************** usb host 1.0(ohci) 移植 (未成功) *********************************/
+（1）拷贝ohci-exynos.c为ohci-s5p.c
+
+（2）替换所有的exynos为s5p
+
+（3）由于有些地方是exynos4，所以，还需要将s5p4替换为s5p
+
+（4）添加:usb-ohci-s5p.h 将ohci-s5p.c的usb-ohci-exynos.h头文件改为：usb-ohci-s5p.h
+	#include <linux/platform_data/usb-ohci-s5p.h>
+
+/home/kingders/smart210/kernel/kernel2/linux-3.10.102/drivers/usb/host/ohci-hcd.c 添加
+/* add by huang */
+#ifdef CONFIG_USB_OHCI_S5P  
+#include "ohci-s5p.c"  
+#define S5P_PLATFORM_DRIVER     s5p_ohci_driver  
+#endif  
+#if	!defined(PCI_DRIVER) &&		\
+	!defined(PLATFORM_DRIVER) &&	\
+	!defined(OMAP1_PLATFORM_DRIVER) &&	\
+	!defined(OMAP3_PLATFORM_DRIVER) &&	\
+	!defined(OF_PLATFORM_DRIVER) &&	\
+	!defined(SA1111_DRIVER) &&	\
+	!defined(PS3_SYSTEM_BUS_DRIVER) && \
+	!defined(SM501_OHCI_DRIVER) && \
+	!defined(TMIO_OHCI_DRIVER) && \
+	!defined(S3C2410_PLATFORM_DRIVER) && \
+	!defined(EXYNOS_PLATFORM_DRIVER) && \
+/*add*/	!defined(S5P_PLATFORM_DRIVER) && \
+	!defined(EP93XX_PLATFORM_DRIVER) && \
+	!defined(AT91_PLATFORM_DRIVER) && \
+	!defined(NXP_PLATFORM_DRIVER) && \
+	!defined(DAVINCI_PLATFORM_DRIVER) && \
+	!defined(SPEAR_PLATFORM_DRIVER)
+#error "missing bus glue for ohci-hcd"
+#endif
+#ifdef S5P_PLATFORM_DRIVER
+	retval = platform_driver_register(&S5P_PLATFORM_DRIVER);
+	if (retval < 0)
+		goto error_s5p;
+#endif
+#ifdef S5P_PLATFORM_DRIVER
+	platform_driver_unregister(&S5P_PLATFORM_DRIVER);
+ error_s5p:
+#endif
+#ifdef S5P_PLATFORM_DRIVER
+	platform_driver_unregister(&S5P_PLATFORM_DRIVER);
+#endif
+
+
+Kconfig添加
+if USB_OHCI_HCD
+config USB_OHCI_S5P
+	boolean "S5P OHCI support"
+	depends on PLAT_S5P
+	help
+	 Enable support for the Samsung S5P SOC's on-chip OHCI controller.
+
+
+/////////////////////////配置平台支持
+arch/arm/plat-samsung/include/plat/devs.h添加
+extern struct platform_device s5p_device_ohci;
+
+arch/arm/plat-samsung/devs.c添加
+#include <linux/platform_data/usb-ohci-s5p.h>	/* add by huang */
+/* USB OHCI Host Controller */
+
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+static struct resource s5p_ohci_resource[] = {  
+    [0] = DEFINE_RES_MEM(0xEC300000, SZ_256),  
+    [1] = DEFINE_RES_IRQ(S5P_IRQ_VIC1(23)),  
+};  
+  
+struct platform_device s5p_device_ohci = {  
+    .name       = "s5p-ohci",  
+    .id     = -1,  
+    .num_resources  = ARRAY_SIZE(s5p_ohci_resource),  
+    .resource   = s5p_ohci_resource,  
+    .dev        = {  
+        .dma_mask       = &samsung_device_dma_mask,  
+        .coherent_dma_mask  = DMA_BIT_MASK(32),  
+    }  
+};  
+  
+void __init s5p_ohci_set_platdata(struct s5p_ohci_platdata *pd)  
+{  
+    struct s5p_ohci_platdata *npd;  
+  
+    npd = s3c_set_platdata(pd, sizeof(struct s5p_ohci_platdata),  
+            &s5p_device_ohci);  
+  
+    if (!npd->phy_init)  
+        npd->phy_init = s5p_usb_phy_init;  
+    if (!npd->phy_exit)  
+        npd->phy_exit = s5p_usb_phy_exit;  
+}  
+#endif /* CONFIG_S5P_DEV_USB_OHCI */ 
+
+arch/arm/plat-samsung/Kconfig添加
+config S5P_DEV_USB_OHCI  
+	bool  
+	help  
+	  Compile in platform device definition for USB OHCI  
+
+/arch/arm/mach-s5pv210/mach-smdkv210.c修改:
+/* USB EHCI OHCI */
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+static struct s5p_ehci_platdata s5p_ehci_platdata;  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+static struct s5p_ohci_platdata s5p_ohci_platdata;  
+#endif 
+static struct platform_device *smdkv210_devices[] __initdata = {
+........
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+	&s5p_device_ehci,  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+	&s5p_device_ohci,  
+#endif 
+........
+static void __init smdkv210_machine_init(void)
+{.......
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+        s5p_ehci_set_platdata(&s5p_ehci_platdata);  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+        s5p_ohci_set_platdata(&s5p_ohci_platdata);  
+#endif 
+
+/////////////////////修改setup-usb-phy.c文件
+arch/arm/mach-s5pv210/setup-usb-phy.c
+
+同时修改arch/arm/plat-samsung/include/plat/usb-phy.h添加
+enum s5p_usb_phy_type {
+	S5P_USB_PHY_DEVICE,
+	S5P_USB_PHY_HOST,
+};
+或者,继续修改setup-usb-phy.c,修改S5P_USB_PHY_HOST为USB_PHY_TYPE_HOST
+
+/////////////////////内核配置项修改
+driver/usb/Kconfig
+config USB_ARCH_HAS_OHCI
+	boolean
+	# ARM:
+	....
+	default y if PLAT_S5P  
+
+drivers/usb/host/Kconfig
+config USB_EHCI_S5P
+       tristate "EHCI support for Samsung S5P/EXYNOS SoC Series"
+       depends on PLAT_S5P
+       select S5P_DEV_USB_EHCI  
+       help
+	Enable support for the Samsung S5Pxxxx and Exynos3/4/5 SOC's
+	on-chip EHCI controller.
+config USB_OHCI_S5P
+	boolean "S5P OHCI support"
+	depends on PLAT_S5P
+        select S5P_DEV_USB_OHCI
+	help
+	 Enable support for the Samsung S5P SOC's on-chip OHCI controller.
+
+make menusconfig...
+编译后执行log:
+Starting kernel ...
+
+Uncompressing Linux... done, booting the kernel.
+Booting Linux on physical CPU 0x0
+Linux version 3.10.102 (kingders@kingders-ThinkPad-T420) (gcc version 4.5.1 (ctng-1.8.1-FA) ) #4 PREEMPT Mon Sep 12 15:17:49 CST 2016
+CPU: ARMv7 Processor [412fc082] revision 2 (ARMv7), cr=10c53c7d
+CPU: PIPT / VIPT nonaliasing data cache, VIPT aliasing instruction cache
+Machine: SMDKV210
+Memory policy: ECC disabled, Data cache writeback
+CPU S5PV210/S5PC110 (id 0x43110220)
+S3C24XX Clocks, Copyright 2004 Simtec Electronics
+S5PV210: PLL settings, A=1000000000, M=667000000, E=96000000 V=54000000
+S5PV210: ARMCLK=1000000000, HCLKM=200000000, HCLKD=166750000
+HCLKP=133400000, PCLKM=100000000, PCLKD=83375000, PCLKP=66700000
+sclk_dmc: source is sclk_a2m (0), rate is 200000000
+sclk_onenand: source is hclk_psys (0), rate is 66700000
+sclk_fimc: source is ext_xtal (0), rate is 24000000
+sclk_fimc: source is ext_xtal (0), rate is 24000000
+sclk_fimc: source is ext_xtal (0), rate is 24000000
+sclk_cam0: source is ext_xtal (0), rate is 24000000
+sclk_cam1: source is ext_xtal (0), rate is 24000000
+sclk_fimd: source is ext_xtal (0), rate is 24000000
+sclk_mfc: source is sclk_a2m (0), rate is 200000000
+sclk_g2d: source is sclk_a2m (0), rate is 200000000
+sclk_g3d: source is sclk_a2m (0), rate is 200000000
+sclk_csis: source is ext_xtal (0), rate is 24000000
+sclk_pwi: source is ext_xtal (0), rate is 24000000
+sclk_pwm: source is ext_xtal (0), rate is 24000000
+CPU: All CPU(s) started in SVC mode.
+Built 1 zonelists in Zone order, mobility grouping on.  Total pages: 16256
+Kernel command line: root=/dev/nfs nfsroot=192.168.2.227:/home/kingders/smart210/rootfs/rootfs1 ip=192.168.2.120:192.168.2.227:192.168.2.1:255.255.255.0 init=/linuxrc console=ttySAC0,115200n8 mem=64m
+PID hash table entries: 256 (order: -2, 1024 bytes)
+Dentry cache hash table entries: 8192 (order: 3, 32768 bytes)
+Inode-cache hash table entries: 4096 (order: 2, 16384 bytes)
+Memory: 64MB = 64MB total
+Memory: 60444k/60444k available, 5092k reserved, 0K highmem
+Virtual kernel memory layout:
+    vector  : 0xffff0000 - 0xffff1000   (   4 kB)
+    fixmap  : 0xfff00000 - 0xfffe0000   ( 896 kB)
+    vmalloc : 0x84800000 - 0xff000000   (1960 MB)
+    lowmem  : 0x80000000 - 0x84000000   (  64 MB)
+    modules : 0x7f000000 - 0x80000000   (  16 MB)
+      .text : 0x80008000 - 0x803b9f3c   (3784 kB)
+      .init : 0x803ba000 - 0x803e004c   ( 153 kB)
+      .data : 0x803e2000 - 0x80418740   ( 218 kB)
+       .bss : 0x80418740 - 0x80456068   ( 247 kB)
+SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+Preemptible hierarchical RCU implementation.
+NR_IRQS:208
+VIC @f6000000: id 0x00041192, vendor 0x41
+VIC @f6010000: id 0x00041192, vendor 0x41
+VIC @f6020000: id 0x00041192, vendor 0x41
+VIC @f6030000: id 0x00041192, vendor 0x41
+sched_clock: 32 bits at 33MHz, resolution 29ns, wraps every 128784ms
+Console: colour dummy device 80x30
+Calibrating delay loop... 663.55 BogoMIPS (lpj=1658880)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 512
+CPU: Testing write buffer coherency: ok
+Setting up static identity map for 0x802c73b8 - 0x802c7410
+NET: Registered protocol family 16
+DMA: preallocated 256 KiB pool for atomic coherent allocations
+S3C Power Management, Copyright 2004 Simtec Electronics
+S5PV210: Initializing architecture
+bio: create slab <bio-0> at 0
+SCSI subsystem initialized
+usbcore: registered new interface driver usbfs
+usbcore: registered new interface driver hub
+usbcore: registered new device driver usb
+Switching to clocksource samsung_clocksource_timer
+NET: Registered protocol family 2
+TCP established hash table entries: 512 (order: 0, 4096 bytes)
+TCP bind hash table entries: 512 (order: 1, 10240 bytes)
+TCP: Hash tables configured (established 512 bind 512)
+TCP: reno registered
+UDP hash table entries: 256 (order: 1, 12288 bytes)
+UDP-Lite hash table entries: 256 (order: 1, 12288 bytes)
+NET: Registered protocol family 1
+RPC: Registered named UNIX socket transport module.
+RPC: Registered udp transport module.
+RPC: Registered tcp transport module.
+RPC: Registered tcp NFSv4.1 backchannel transport module.
+ROMFS MTD (C) 2007 Red Hat, Inc.
+io scheduler noop registered
+io scheduler deadline registered
+io scheduler cfq registered (default)
+Console: switching to colour frame buffer device 100x30
+s3c-fb s5pv210-fb: window 0: fb 
+dma-pl330 dma-pl330.0: Loaded driver for PL330 DMAC-267056
+dma-pl330 dma-pl330.0:  DBUFF-8x4bytes Num_Chans-8 Num_Peri-32 Num_Events-32
+dma-pl330 dma-pl330.1: Loaded driver for PL330 DMAC-267056
+dma-pl330 dma-pl330.1:  DBUFF-8x4bytes Num_Chans-8 Num_Peri-32 Num_Events-32
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+s5pv210-uart.0: ttySAC0 at MMIO 0xe2900000 (irq = 74) is a S3C6400/10
+console [ttySAC0] enabled
+s5pv210-uart.1: ttySAC1 at MMIO 0xe2900400 (irq = 75) is a S3C6400/10
+s5pv210-uart.2: ttySAC2 at MMIO 0xe2900800 (irq = 76) is a S3C6400/10
+s5pv210-uart.3: ttySAC3 at MMIO 0xe2900c00 (irq = 77) is a S3C6400/10
+brd: module loaded
+loop: module loaded
+dm9000 dm9000: read wrong id 0x01010101
+eth0: dm9000a at 849d8000,849da004 IRQ 39 MAC: 00:09:c0:ff:ec:48 (platform data)
+ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+ehci-platform: EHCI generic platform driver
+ehci-s5p: EHCI s5p driver
+unable to find transceiver of type USB2 PHY
+s5p-ehci s5p-ehci: Failed to get usbhost clock
+s5p-ehci: probe of s5p-ehci failed with error -2
+ohci_hcd: USB 1.1 'Open' Host Controller (OHCI) Driver
+unable to find transceiver of type USB2 PHY
+s5p-ohci s5p-ohci: Failed to get usbhost clock
+s5p-ohci: probe of s5p-ohci failed with error -2
+usbcore: registered new interface driver usb-storage
+usbcore: registered new interface driver usbserial
+mousedev: PS/2 mouse device common for all mice
+touchscreen-1wire       initialized
+backlight-1wire initialized
+setup_irq: ret = 0
+PWM clock = 66700000
+TCNT_FOR_SAMPLE_BIT = 3472, TCFG1 = 00000000
+sdhci: Secure Digital Host Controller Interface driver
+sdhci: Copyright(c) Pierre Ossman
+s3c-sdhci s3c-sdhci.0: clock source 0: mmc_busclk.0 (133400000 Hz)
+s3c-sdhci s3c-sdhci.0: clock source 2: mmc_busclk.2 (96000000 Hz)
+2: TCNTB=00000d90, TCNTO=0000005e, TINT_CSTAT=0000000c
+mmc0: SDHCI controller on samsung-hsmmc [s3c-sdhci.0] using ADMA
+s3c-sdhci s3c-sdhci.1: clock source 0: mmc_busclk.0 (133400000 Hz)
+s3c-sdhci s3c-sdhci.1: clock source 2: mmc_busclk.2 (96000000 Hz)
+mmc0: new high speed SD card at address b368
+mmcblk0: mmc0:b368 SD    1.88 GiB 
+mmc1: SDHCI controller on samsung-hsmmc [s3c-sdhci.1] using ADMA
+s3c-sdhci s3c-sdhci.2: clock source 0: mmc_busclk.0 (133400000 Hz)
+s3c-sdhci s3c-sdhci.2: clock source 2: mmc_busclk.2 (96000000 Hz)
+ mmcblk0:
+mmc2: SDHCI controller on samsung-hsmmc [s3c-sdhci.2] using ADMA
+s3c-sdhci s3c-sdhci.3: clock source 0: mmc_busclk.0 (133400000 Hz)
+s3c-sdhci s3c-sdhci.3: clock source 2: mmc_busclk.2 (96000000 Hz)
+mmc3: SDHCI controller on samsung-hsmmc [s3c-sdhci.3] using ADMA
+sdhci-pltfm: SDHCI platform and OF driver helper
+usbcore: registered new interface driver usbhid
+usbhid: USB HID core driver
+TCP: cubic registered
+NET: Registered protocol family 17
+VFP support v0.3: implementor 41 architecture 3 part 30 variant c rev 2
+dm9000 dm9000 eth0: link down
+dm9000 dm9000 eth0: link down
+IP-Config: Complete:
+     device=eth0, hwaddr=00:09:c0:ff:ec:48, ipaddr=192.168.2.120, mask=255.255.255.0, gw=192.168.2.1
+     host=192.168.2.120, domain=, nis-domain=(none)
+     bootserver=192.168.2.227, rootserver=192.168.2.227, rootpath=
+dm9000 dm9000 eth0: link up, 100Mbps, full-duplex, lpa 0x4DE1
+VFS: Mounted root (nfs filesystem) on device 0:9.
+Freeing unused kernel memory: 152K (803ba000 - 803e0000)
+init started: BusyBox v1.21.1 (2016-09-06 12:09:49 CST)
+Segmentation fault
+
+
+关于usb的问题log:
+ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+ehci-platform: EHCI generic platform driver
+ehci-s5p: EHCI s5p driver
+unable to find transceiver of type USB2 PHY
+s5p-ehci s5p-ehci: Failed to get usbhost clock
+s5p-ehci: probe of s5p-ehci failed with error -2
+ohci_hcd: USB 1.1 'Open' Host Controller (OHCI) Driver
+unable to find transceiver of type USB2 PHY
+s5p-ohci s5p-ohci: Failed to get usbhost clock
+s5p-ohci: probe of s5p-ohci failed with error -2
+
+首先Failed to get usbhost clock :
+将ohci-s5p.c里的s5p_ohci_probe()函数里的：
+s5p_ohci->clk = devm_clk_get(&pdev->dev, "usbhost");
+改为：
+s5p_ohci->clk = devm_clk_get(&pdev->dev, "usb-host");
+结果log:
+ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+ehci-platform: EHCI generic platform driver
+ehci-s5p: EHCI s5p driver
+unable to find transceiver of type USB2 PHY
+s5p-ehci s5p-ehci: EHCI Host Controller
+s5p-ehci s5p-ehci: new USB bus registered, assigned bus number 1
+s5p-ehci s5p-ehci: irq 87, io mem 0xec200000
+s5p-ehci s5p-ehci: USB 2.0 started, EHCI 1.00
+hub 1-0:1.0: USB hub found
+hub 1-0:1.0: 1 port detected
+ohci_hcd: USB 1.1 'Open' Host Controller (OHCI) Driver
+unable to find transceiver of type USB2 PHY
+s5p-ohci s5p-ohci: S5P OHCI Host Controller
+s5p-ohci s5p-ohci: new USB bus registered, assigned bus number 2
+s5p-ohci s5p-ohci: irq 87, io mem 0xec300000
+hub 2-0:1.0: USB hub found
+hub 2-0:1.0: 1 port detected
+然而,插入设备没有作为,怀疑usb的电源问题:
+hub 1-0:1.0: over-current condition on port 1
+hub 2-0:1.0: over-current condition
+menuconfig加入 USB_OTG PM_RUNTIME后再编译,问题依然,
+可能是set-usb-phy.c写得不够合法,重新拷贝网上的,还加了个regs-sys.h在mach里, 编译烧写,问题依然.
+通过对比,linux3.0.8没有unable to find transceiver 这一说
+而linux-3.8的与linux3.10放的地方不一样
+就此作罢,先成功启动linux-3.8的作对比来找问题根源.
+
+
+
+
+
+而且ohci_s5p.c没被编译.
+drivers/usb/host/Makefile添加
+# add by huang
+# obj-$(CONFIG_USB_OHCI_S5P)	+= ohci-s5p.o 然而先不用编译进去
+
+
+/**************************** usb 基础 *********************************/
+
+USB 总线概念:
+	一个 USB 总线引出两个重要的链表，一个为 USB 设备链表，一个为 USB 驱动链表。
+	USB设备链表 包含各种系统中的 USB 设备以及这些设备的所有接口，
+		设备插入 USB 控制器之后，USB core 即会将设备在系统中注册，添加到 USB 设备链表上去
+	USB驱动链表 包含 USB 设备驱动程序（usb device driver）和 USB 驱动程序（usb driver）。
+		每个 USB 驱动程序的被注册时，USB 驱动程序即会添加到驱动链表上去
+USB 设备概念:
+	通过 hub 口   插入的外部设备,便可以称为 USB设备
+	每个 USB 设备 都因为其服务的性质可能有的多样性, 	而有多种配置 configurations
+	每个 配置     都因为服务不同的具体内容,   	而有不同的接口 interfaces, 同一配置,可以有多个接口并行工作
+	每个 接口     都因为数据具体传输方向和要求	而有多个端口 endpoints, 端口提供一种单向数据传输的管道,
+							所以,同一接口,至少需要两个端口工作.
+	每个 端口     都根据数据内容性质			而分为4种类型:控制、中断、批量、等时
+							所以端口除了有方向性,也有数据内容性质的自身属性,
+	控制传输:
+		控制端点被用来控制对 USB 设备的不同部分访问.
+		通常用作配置设备、获取设备信息、发送命令到设备或获取设备状态报告。
+		这些端点通常较小,每个 USB 设备都有一个控制端点称为"端点 0", 被 USB core 用来在插入时配置设备。
+		USB协议保证总有足够的带宽留给控制端点传送数据到设备.
+	中断传输: 
+		每当 USB 主机向设备请求数据时，中断端点以固定的速率传送小量的数据
+		此为USB 键盘和鼠标的主要的数据传送方法。它还用以传送数据到 USB 设备来控制设备.
+		通常不用来传送大量数据。USB协议保证总有足够的带宽留给中断端点传送数据到设备.
+	批量BULK传输:
+		批量端点用以传送大量数据。
+		这些端点常比中断端点大得多. 它们普遍用于不能有任何数据丢失的数据。
+		USB 协议不保证传输在特定时间范围内完成。
+		如果总线上没有足够的空间来发送整个BULK包，它被分为多个包进行传输
+		这些端点普遍用于打印机、USB Mass Storage和USB网络设备上。
+	等时ISOCHRONOUS传输:
+		等时端点也批量传送大量数据, 但是这个数据不被保证能送达。
+		这些端点用在可以处理数据丢失的设备中，并且更多依赖于保持持续的数据流.
+		如音频和视频设备等等。
+	
+USB 驱动:
+	USB 设备驱动;
+		指的是 一部运行的机器,其 USB 系统运行时,使用的驱动程序,
+		不管其 USB 系统 是运行在host主机模式,还是OTG,gadget下的从机模式,还是两者有之的复合模式,
+		主机模式:例如电脑,通过usb访问使用外部设备,电脑的usb是处于主机模式
+		从机模式:例如移动银盘,通过usb被访问,自身也运行着一个最小系统,运行着一个从机模式的usb驱动来回答着电脑的访问请求,
+		复合模式:例如安卓手机,接到电脑时变为一个移动硬盘,处于从机模式,接入一个外部u盘看里面电影时,处于主机模式
+		所以,每台机器,都只有一个 USB 设备驱动.
+		在系统启动注册 USB core 时，USB 设备驱动程序即将被注册，也就添加到 linux驱动链表上去了
+	USB 驱动:
+		我们常说的 USB 驱动, 指的是,在主机模式下,挂载在 USB 驱动链表里的一系列驱动,
+		这些驱动面向的服务对象是接口interfaces,
+		所以 USB 驱动 也可以叫是 接口的驱动
+
+USB 带宽:
+	工作时,USB 驱动 都会把要传输的数据放入 urb 里,再提交USBcore, USBcore传递到 USB主控制器
+	USB主控制器 驱动 安排统合一个数据包,然后执行transmission送出.
+	USB主控制器例如 ehci ohci,对应相关驱动
+	transmission 是流水作业的连续不断地发生的,不管当时是不是需要传数据,类似来坐登山缆车,坐摩天轮
+	所以,一个 transmission 传输包里,可以放置传输到多个设的数据,设备通过检测头,提取属于自己的数据.
+	因此,USB 的带宽是被共享的,同时usb作业的设备越多,每个设备得到的数据传输速度也会降低.
+	中断传输意味着,每次transmission数据包里 都有其设备接口传输的一席之地,不管是否每次都要传输什么有效信息
+	transmission数据包是 处于主机模式的机器的 USB主控制器来生成的,
+	除了有主机发往从机的数据内容,还可以是,主机发往从机的轮询命令,询问从机是否有数据给主机之类
+	usb协议是全双工的,发transmission数据包时,主机也接收着来自从机的数据内容
+	
+USB 过程:
+	机器启动,
+	注册 USB core 时，USB 设备驱动程序将被注册，			添加到 linux 驱动链表上
+	每个 USB 驱动程序的被注册时，					添加到   USB 驱动链表上	
+	设备插入 USB 控制器之后，USB core 即会将设备在系统中注册，	添加到   USB 设备链表上
+	USB 设备驱动程序和 USB 设备的匹配之后，USB core 会对设备 进行配置，
+		分析设备的结构之后会将设备所有 接口 都			添加到   USB 设备链表上
+	当A设备、及接口都添加到 USB 设备链表，且 A一类驱动程序也添加到 USB 驱动链表上， 系统便进入已配置（configured）的状态
+	以上过程，系统将会建立起该设备的的设备、配置、接口、设置、端点的结构体描述信息，
+		它们分别为:	usb_device、
+			  	usb_configuration、
+				usb_interface、
+				usb_host_interface、
+				usb_host_endpoint.
+	然后,USB 驱动程序 和 相应接口 进行配对:
+		USB core 会调用 usb_device_match 函数，通过比较设备中的接口信息和 USB 驱动程序中的 id_table，
+		初步决定该 USB 驱动程序是不是跟相应接口相匹配.
+		通过这一道关卡后，USB core 会认为这个设备应该由这个驱动程序负责。
+	接着，将会调用 USB 驱动程序中的 probe 函数对相应接口进行进一步检查。
+		如果该驱动程序确实适合设备接口，对设备做一些初始化工作，分配 urb 准备数据传输。
+
+urb:
+	usb驱动,实际上通过给USBcore递交urb请求,请求受理并完成后调用回调处理函数的方式,
+	实现了usb主机对从机设备的访问,控制,和传递数据的功能.
+
+USB 鼠标例子
+以下是一个usb鼠标驱动的例子,
+	usb_mouse_init	应该是在 USB 驱动程序的被注册时 由USBcore调用的,
+	插入usb鼠标后,
+	probe程序	应该是在 USB 驱动程序 和 相应接口 进行配对 后由USBcore调用的,
+			probe程序成功后,usb鼠标变可以工作,
+			而且还会另外注册了一个linux输入(input)设备,把usb鼠标得到信息,源源不断写入输入设备文件
+
+/*
+　*  USB HIDBP Mouse support
+　*/
+
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/usb/input.h>
+#include <linux/hid.h>
+/*
+ * Version Information
+　*/
+#define DRIVER_VERSION "v1.6"
+#define DRIVER_AUTHOR "Vojtech Pavlik <vojtech@ucw.cz>"
+#define DRIVER_DESC "USB HID Boot Protocol mouse driver"
+#define DRIVER_LICENSE "GPL"
+MODULE_AUTHOR(DRIVER_AUTHOR);
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_LICENSE(DRIVER_LICENSE);
+/*
+　* 鼠标结构体，用于描述鼠标设备。
+　*/
+struct usb_mouse
+{
+　　/* 鼠标设备的名称，包括生产厂商、产品类别、产品等信息 */
+　　char name[128];
+　　/* 设备节点名称 */
+　　char phys[64];
+　　/* USB 鼠标是一种 USB 设备，需要内嵌一个 USB 设备结构体来描述其 USB 属性 */
+　　struct usb_device *usbdev;
+　　/* USB 鼠标同时又是一种输入设备，需要内嵌一个输入设备结构体来描述其输入设备的属性 */
+　　struct input_dev *dev;
+　　/* URB 请求包结构体，用于传送数据 */
+　　struct urb *irq;
+　　/* 普通传输用的地址 */
+　　signed char *data;
+　　/* dma 传输用的地址 */
+　　dma_addr_t data_dma;
+};
+/*
+　* urb 回调函数，在完成提交 urb 后，urb 回调函数将被调用。
+　* 此函数作为 usb_fill_int_urb 函数的形参，为构建的 urb 制定的回调函数。
+　*/
+static void usb_mouse_irq(struct urb *urb)
+{
+　　/*
+　　* urb 中的 context 指针用于为 USB 驱动程序保存一些数据。比如在这个回调函数的形参没有传递在 probe
+　　* 中为 mouse 结构体分配的那块内存的地址指针，而又需要用到那块内存区域中的数据，context 指针则帮了
+　　* 大忙了！
+　　* 在填充 urb 时将 context 指针指向 mouse 结构体数据区，在这又创建一个局部 mouse 指针指向在 probe
+　　* 函数中为 mouse 申请的那块内存，那块内存保存着非常重要数据。
+　　* 当 urb 通过 USB core 提交给 hc 之后，如果结果正常，mouse->data 指向的内存区域将保存着鼠标的按键
+　　* 和移动坐标信息，系统则依靠这些信息对鼠标的行为作出反应。
+　　* mouse 中内嵌的 dev 指针，指向 input_dev 所属于的内存区域。
+　　*/
+　　struct usb_mouse *mouse = urb->context;
+　　signed char *data = mouse->data;
+　　struct input_dev *dev = mouse->dev;
+　　int status;
+　　/*
+　　* status 值为 0 表示 urb 成功返回，直接跳出循环把鼠标事件报告给输入子系统。
+　　* ECONNRESET 出错信息表示 urb 被 usb_unlink_urb 函数给 unlink 了，ENOENT 出错信息表示 urb 被
+　　* usb_kill_urb 函数给 kill 了。usb_kill_urb 表示彻底结束 urb 的生命周期，而 usb_unlink_urb 则
+　　* 是停止 urb，这个函数不等 urb 完全终止就会返回给回调函数。这在运行中断处理程序时或者等待某自旋锁
+　　* 时非常有用，在这两种情况下是不能睡眠的，而等待一个 urb 完全停止很可能会出现睡眠的情况。
+　　* ESHUTDOWN 这种错误表示 USB 主控制器驱动程序发生了严重的错误，或者提交完 urb 的一瞬间设备被拔出。
+　　* 遇见除了以上三种错误以外的错误，将申请重传 urb。
+　　*/
+　　switch (urb->status)
+　　{
+　　case 0:     /* success */
+　　break;
+　　case -ECONNRESET:   /* unlink */
+　　case -ENOENT:
+　　case -ESHUTDOWN:
+　　return;
+　　/* -EPIPE:  should clear the halt */
+　　default:        /* error */
+　　goto resubmit;
+　　}
+　　/*
+　　* 向输入子系统汇报鼠标事件情况，以便作出反应。
+　　* data 数组的第0个字节：bit 0、1、2、3、4分别代表左、右、中、SIDE、EXTRA键的按下情况；
+　　* data 数组的第1个字节：表示鼠标的水平位移；
+　　* data 数组的第2个字节：表示鼠标的垂直位移；
+　　* data 数组的第3个字节：REL_WHEEL位移。
+　　*/
+　　input_report_key(dev, BTN_LEFT,   data[0] & 0x01);
+　　input_report_key(dev, BTN_RIGHT,  data[0] & 0x02);
+　　input_report_key(dev, BTN_MIDDLE, data[0] & 0x04);
+　　input_report_key(dev, BTN_SIDE,   data[0] & 0x08);
+　　input_report_key(dev, BTN_EXTRA,  data[0] & 0x10);
+　　input_report_rel(dev, REL_X,     data[1]);
+　　input_report_rel(dev, REL_Y,     data[2]);
+　　input_report_rel(dev, REL_WHEEL, data[3]);
+　　/*
+　　* 这里是用于事件同步。上面几行是一次完整的鼠标事件，包括按键信息、绝对坐标信息和滚轮信息，输入子
+　　* 系统正是通过这个同步信号来在多个完整事件报告中区分每一次完整事件报告。示意如下：
+　　* 按键信息 坐标位移信息 滚轮信息 EV_SYC | 按键信息 坐标位移信息 滚轮信息 EV_SYC ...
+　　*/
+　　input_sync(dev);
+　　/*
+　　* 系统需要周期性不断地获取鼠标的事件信息，因此在 urb 回调函数的末尾再次提交 urb 请求块，这样又会
+　　* 调用新的回调函数，周而复始。
+　　* 在回调函数中提交 urb 一定只能是 GFP_ATOMIC 优先级的，因为 urb 回调函数运行于中断上下文中，在提
+　　* 交 urb 过程中可能会需要申请内存、保持信号量，这些操作或许会导致 USB core 睡眠，一切导致睡眠的行
+　　* 为都是不允许的。
+　　*/
+　　resubmit:
+　　status = usb_submit_urb (urb, GFP_ATOMIC);
+　　if (status)
+　　err ("can't resubmit intr, %s-%s/input0, status %d",
+　　mouse->usbdev->bus->bus_name,
+　　mouse->usbdev->devpath, status);
+　　}
+　　/*
+　　* 打开鼠标设备时，开始提交在 probe 函数中构建的 urb，进入 urb 周期。
+　　*/
+　　static int usb_mouse_open(struct input_dev *dev)
+　　{
+　　struct usb_mouse *mouse = dev->private;
+　　mouse->irq->dev = mouse->usbdev;
+　　if (usb_submit_urb(mouse->irq, GFP_KERNEL))
+　　return -EIO;
+　　return 0;
+　　}
+　　/*
+　　* 关闭鼠标设备时，结束 urb 生命周期。
+　　*/
+　　static void usb_mouse_close(struct input_dev *dev)
+　　{
+　　struct usb_mouse *mouse = dev->private;
+　　usb_kill_urb(mouse->irq);
+　　}
+　　/*
+　　* 驱动程序的探测函数
+　　*/
+　　static int usb_mouse_probe(struct usb_interface *intf, const struct usb_device_id *id)
+　　{
+　　/*
+　　* 接口结构体包含于设备结构体中，interface_to_usbdev 是通过接口结构体获得它的设备结构体。
+　　* usb_host_interface 是用于描述接口设置的结构体，内嵌在接口结构体 usb_interface 中。
+　　* usb_endpoint_descriptor 是端点描述符结构体，内嵌在端点结构体 usb_host_endpoint 中，而端点
+　　* 结构体内嵌在接口设置结构体中。
+  * usb_interface -> usb_host_interface -> usb_host_endpoint -> usb_endpoint_descriptor
+  */
+　　struct usb_device *dev = interface_to_usbdev(intf);
+　　struct usb_host_interface *interface;
+　　struct usb_endpoint_descriptor *endpoint;
+　　struct usb_mouse *mouse;
+　　struct input_dev *input_dev;
+　　int pipe, maxp;
+　　interface = intf->cur_altsetting;
+　　/* 鼠标仅有一个 interrupt 类型的 in 端点，不满足此要求的设备均报错 */
+　　if (interface->desc.bNumEndpoints != 1)
+　　return -ENODEV;
+　　endpoint = &interface->endpoint[0].desc;
+　　if (!usb_endpoint_is_int_in(endpoint))
+　　return -ENODEV;
+　　/*
+　　* 返回对应端点能够传输的最大的数据包，鼠标的返回的最大数据包为4个字节，数据包具体内容在 urb
+　　* 回调函数中有详细说明。
+　　*/
+　　pipe = usb_rcvintpipe(dev, endpoint->bEndpointAddress);
+　　maxp = usb_maxpacket(dev, pipe, usb_pipeout(pipe));
+　　/* 为 mouse 设备结构体分配内存 */
+　　mouse = kzalloc(sizeof(struct usb_mouse), GFP_KERNEL);
+　　/* input_dev */
+　　input_dev = input_allocate_device();
+　　if (!mouse || !input_dev)
+　　goto fail1;
+　　/*
+　　* 申请内存空间用于数据传输，data 为指向该空间的地址，data_dma 则是这块内存空间的 dma 映射，
+　　* 即这块内存空间对应的 dma 地址。在使用 dma 传输的情况下，则使用 data_dma 指向的 dma 区域，
+　　* 否则使用 data 指向的普通内存区域进行传输。
+　　* GFP_ATOMIC 表示不等待，GFP_KERNEL 是普通的优先级，可以睡眠等待，由于鼠标使用中断传输方式，
+　　* 不允许睡眠状态，data 又是周期性获取鼠标事件的存储区，因此使用 GFP_ATOMIC 优先级，如果不能
+　　* 分配到内存则立即返回 0。
+　　*/
+　　mouse->data = usb_buffer_alloc(dev, 8, GFP_ATOMIC, &mouse->data_dma);
+　　if (!mouse->data)
+　　goto fail1;
+　　/*
+　　* 为 urb 结构体申请内存空间，第一个参数表示等时传输时需要传送包的数量，其它传输方式则为0。
+　　* 申请的内存将通过下面即将见到的 usb_fill_int_urb 函数进行填充。
+　　*/
+　　mouse->irq = usb_alloc_urb(0, GFP_KERNEL);
+　　if (!mouse->irq)
+　　goto fail2;
+　　/* 填充 usb 设备结构体和输入设备结构体 */
+　　mouse->usbdev = dev;
+　　mouse->dev = input_dev;
+　　/* 获取鼠标设备的名称 */
+　　if (dev->manufacturer)
+　　strlcpy(mouse->name, dev->manufacturer, sizeof(mouse->name));
+　　if (dev->product)
+　　{
+　　if (dev->manufacturer)
+　　strlcat(mouse->name, " ", sizeof(mouse->name));
+　　strlcat(mouse->name, dev->product, sizeof(mouse->name));
+　　}
+　　if (!strlen(mouse->name))
+　　snprintf(mouse->name, sizeof(mouse->name),
+　　"USB HIDBP Mouse %04x:%04x",
+　　le16_to_cpu(dev->descriptor.idVendor),
+　　le16_to_cpu(dev->descriptor.idProduct));
+　　/*
+　　* 填充鼠标设备结构体中的节点名。usb_make_path 用来获取 USB 设备在 Sysfs 中的路径，格式
+　　* 为：usb-usb 总线号-路径名。
+　　*/
+　　usb_make_path(dev, mouse->phys, sizeof(mouse->phys));
+　　strlcat(mouse->phys, "/input0", sizeof(mouse->phys));
+　　/* 将鼠标设备的名称赋给鼠标设备内嵌的输入子系统结构体 */
+　　input_dev->name = mouse->name;
+　　/* 将鼠标设备的设备节点名赋给鼠标设备内嵌的输入子系统结构体 */
+　　input_dev->phys = mouse->phys;
+　　/*
+　　* input_dev 中的 input_id 结构体，用来存储厂商、设备类型和设备的编号，这个函数是将设备描述符
+　　* 中的编号赋给内嵌的输入子系统结构体
+　　*/
+　　usb_to_input_id(dev, &input_dev->id);
+　　/* cdev 是设备所属类别（class device） */
+　　input_dev->cdev.dev = &intf->dev;
+　　/* evbit 用来描述事件，EV_KEY 是按键事件，EV_REL 是相对坐标事件 */
+　　input_dev->evbit[0] = BIT(EV_KEY) | BIT(EV_REL);
+　　/* keybit 表示键值，包括左键、右键和中键 */
+　　input_dev->keybit[LONG(BTN_MOUSE)] = BIT(BTN_LEFT) | BIT(BTN_RIGHT) | BIT(BTN_MIDDLE);
+　　/* relbit 用于表示相对坐标值 */
+　　input_dev->relbit[0] = BIT(REL_X) | BIT(REL_Y);
+　　/* 有的鼠标还有其它按键 */
+　　input_dev->keybit[LONG(BTN_MOUSE)] |= BIT(BTN_SIDE) | BIT(BTN_EXTRA);
+　　/* 中键滚轮的滚动值 */
+　　input_dev->relbit[0] |= BIT(REL_WHEEL);
+　　/* input_dev 的 private 数据项用于表示当前输入设备的种类，这里将鼠标结构体对象赋给它 */
+　　input_dev->private = mouse;
+　　/* 填充输入设备打开函数指针 */
+　　input_dev->open = usb_mouse_open;
+　　/* 填充输入设备关闭函数指针 */
+　　input_dev->close = usb_mouse_close;
+　　/*
+　　* 填充构建 urb，将刚才填充好的 mouse 结构体的数据填充进 urb 结构体中，在 open 中递交 urb。
+　　* 当 urb 包含一个即将传输的 DMA 缓冲区时应该设置 URB_NO_TRANSFER_DMA_MAP。USB核心使用
+　　* transfer_dma变量所指向的缓冲区，而不是transfer_buffer变量所指向的。
+　　* URB_NO_SETUP_DMA_MAP 用于 Setup 包，URB_NO_TRANSFER_DMA_MAP 用于所有 Data 包。
+　　*/
+　　usb_fill_int_urb(mouse->irq, dev, pipe, mouse->data,
+　　(maxp > 8 ? 8 : maxp),
+　　usb_mouse_irq, mouse, endpoint->bInterval);
+　　mouse->irq->transfer_dma = mouse->data_dma;
+　　mouse->irq->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+　　/* 向系统注册输入设备 */
+　　input_register_device(mouse->dev);
+　　/*
+　　* 一般在 probe 函数中，都需要将设备相关信息保存在一个 usb_interface 结构体中，以便以后通过
+　　* usb_get_intfdata 获取使用。这里鼠标设备结构体信息将保存在 intf 接口结构体内嵌的设备结构体中
+　　* 的 driver_data 数据成员中，即 intf->dev->dirver_data = mouse。
+　　*/
+　　usb_set_intfdata(intf, mouse);
+　　return 0;
+　　fail2:  usb_buffer_free(dev, 8, mouse->data, mouse->data_dma);
+　　fail1:  input_free_device(input_dev);
+　　kfree(mouse);
+　　return -ENOMEM;
+　　}
+　　/*
+　　* 鼠标设备拔出时的处理函数
+　　*/
+　　static void usb_mouse_disconnect(struct usb_interface *intf)
+　　{
+　　/* 获取鼠标设备结构体 */
+　　struct usb_mouse *mouse = usb_get_intfdata (intf);
+　　/* intf->dev->dirver_data = NULL，将接口结构体中的鼠标设备指针置空。*/
+　　usb_set_intfdata(intf, NULL);
+　　if (mouse)
+　　{
+　　/* 结束 urb 生命周期 */
+　　usb_kill_urb(mouse->irq);
+　　/* 将鼠标设备从输入子系统中注销 */
+　　input_unregister_device(mouse->dev);
+　　/* 释放 urb 存储空间 */
+　　usb_free_urb(mouse->irq);
+　　/* 释放存放鼠标事件的 data 存储空间 */
+　　usb_buffer_free(interface_to_usbdev(intf), 8, mouse->data, mouse->data_dma);
+　　/* 释放存放鼠标结构体的存储空间 */
+　　kfree(mouse);
+　　}
+　　}
+　　/*
+　　* usb_device_id 结构体用于表示该驱动程序所支持的设备，USB_INTERFACE_INFO 可以用来匹配特定类型的接口，
+　　* 这个宏的参数意思为 (类别, 子类别, 协议)。
+　　* USB_INTERFACE_CLASS_HID 表示是一种 HID (Human Interface Device)，即人机交互设备类别；
+　　* USB_INTERFACE_SUBCLASS_BOOT 是子类别，表示是一种 boot 阶段使用的 HID；
+　　* USB_INTERFACE_PROTOCOL_MOUSE 表示是鼠标设备，遵循鼠标的协议。
+　　*/
+　　static struct usb_device_id usb_mouse_id_table [] = {
+　　{ USB_INTERFACE_INFO(USB_INTERFACE_CLASS_HID, USB_INTERFACE_SUBCLASS_BOOT,
+　　USB_INTERFACE_PROTOCOL_MOUSE) },
+　　{ } /* Terminating entry */
+　　};
+　　/*
+　　* 这个宏用来让运行在用户空间的程序知道这个驱动程序能够支持的设备，对于 USB 驱动程序来说，第一个参数必须
+　　* 是 usb。
+　　*/
+　　MODULE_DEVICE_TABLE (usb, usb_mouse_id_table);
+　　/*
+　　* 鼠标驱动程序结构体
+　　*/
+　　static struct usb_driver usb_mouse_driver = {
+　　.name       = "usbmouse",
+　　.probe      = usb_mouse_probe,
+　　.disconnect = usb_mouse_disconnect,
+　　.id_table   = usb_mouse_id_table,
+　　};
+　　/*
+　　* 驱动程序生命周期的开始点，向 USB core 注册这个鼠标驱动程序。
+　　*/
+　　static int __init usb_mouse_init(void)
+　　{
+　　int retval = usb_register(&usb_mouse_driver);
+　　if (retval == 0)
+　　info(DRIVER_VERSION ":" DRIVER_DESC);
+　　return retval;
+　　}
+　　/*
+　　* 驱动程序生命周期的结束点，向 USB core 注销这个鼠标驱动程序。
+　　*/
+　　static void __exit usb_mouse_exit(void)
+　　{
+　　usb_deregister(&usb_mouse_driver);
+　　}
+　　module_init(usb_mouse_init);
+　　module_exit(usb_mouse_exit);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

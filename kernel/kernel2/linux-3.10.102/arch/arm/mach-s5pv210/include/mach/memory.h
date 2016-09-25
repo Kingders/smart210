@@ -22,6 +22,6 @@
  */
 
 #define MAX_PHYSMEM_BITS	31
-#define SECTION_SIZE_BITS	28
+#define SECTION_SIZE_BITS	29
 
 #endif /* __ASM_ARCH_MEMORY_H */

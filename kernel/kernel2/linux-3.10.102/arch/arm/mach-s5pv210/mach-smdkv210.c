@@ -41,6 +41,8 @@
 #include <linux/platform_data/touchscreen-s3c2410.h>
 #include <linux/platform_data/ata-samsung_cf.h>
 #include <linux/platform_data/i2c-s3c2410.h>
+#include <linux/platform_data/usb-ohci-s5p.h>	/* add */
+#include <linux/platform_data/usb-ehci-s5p.h>	/* add */
 #include <plat/keypad.h>
 #include <plat/pm.h>
 #include <plat/fb.h>
@@ -216,6 +218,15 @@ static struct s3c_fb_platdata smdkv210_lcd0_pdata __initdata = {
 /* USB OTG */
 static struct s3c_hsotg_plat smdkv210_hsotg_pdata;
 
+/* USB EHCI OHCI */
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+static struct s5p_ehci_platdata s5p_ehci_platdata;  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+static struct s5p_ohci_platdata s5p_ohci_platdata;  
+#endif 
+
+
 static struct platform_device *smdkv210_devices[] __initdata = {
 	&s3c_device_adc,
 	&s3c_device_cfcon,
@@ -231,6 +242,12 @@ static struct platform_device *smdkv210_devices[] __initdata = {
 	&s3c_device_ts,
 	&s3c_device_usb_hsotg,
 	&s3c_device_wdt,
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+	&s5p_device_ehci,  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+	&s5p_device_ohci,  
+#endif 
 	&s5p_device_fimc0,
 	&s5p_device_fimc1,
 	&s5p_device_fimc2,
@@ -309,6 +326,13 @@ static void __init smdkv210_machine_init(void)
 	s3c_pm_init();
 	/* add by huang */
 	/*smdkv210_dm9000_init();*/
+
+#ifdef CONFIG_S5P_DEV_USB_EHCI  
+        s5p_ehci_set_platdata(&s5p_ehci_platdata);  
+#endif  
+#ifdef CONFIG_S5P_DEV_USB_OHCI  
+        s5p_ohci_set_platdata(&s5p_ohci_platdata);  
+#endif 
 
 	samsung_keypad_set_platdata(&smdkv210_keypad_data);
 	s3c24xx_ts_set_platdata(NULL);

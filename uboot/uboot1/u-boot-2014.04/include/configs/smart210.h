@@ -37,7 +37,7 @@
 #define CONFIG_SYS_SDRAM_BASE		0x20000000	/* modied by zjh */
 
 /* Text Base */
-#define CONFIG_SYS_TEXT_BASE		0x20000000	/* modied by zjh */
+#define CONFIG_SYS_TEXT_BASE		0x22E00000	/* modied by zjh */
 
 #define CONFIG_SETUP_MEMORY_TAGS
 #define CONFIG_CMDLINE_TAG

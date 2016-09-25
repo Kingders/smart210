@@ -988,11 +988,18 @@ save		//然后命令参数便存入了环境变量里,存到nandflash里
 
 
 
+工作用到:
+set bootargs root=/dev/nfs nfsroot=192.168.2.208:/home/kingders/smart210/kernel/kernel2/rootfs ip=192.168.2.120:192.168.2.208:192.168.2.1:255.255.255.0 console=ttySAC0,115200n8 mem=64m
 
+setenv bootmenu_0 "start0=tftp 20000000 uImage; bootm"
 
+set serverip 192.168.2.208
 
+set machid 998 
 
+saveenv
 
+setenv bootargs noinitrd root=/dev/nfs nfsroot=192.168.0.105:/home/hgq/nfs,tcp ip=192.168.0.135:192.168.0.105:192.168.0.1:255.255.255.0::eth0:off init=/linuxrc console=ttySAC0,115200
 
 
 

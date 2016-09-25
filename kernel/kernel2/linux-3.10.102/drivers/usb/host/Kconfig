@@ -226,6 +226,7 @@ config USB_EHCI_SH
 config USB_EHCI_S5P
        tristate "EHCI support for Samsung S5P/EXYNOS SoC Series"
        depends on PLAT_S5P
+       select S5P_DEV_USB_EHCI  
        help
 	Enable support for the Samsung S5Pxxxx and Exynos3/4/5 SOC's
 	on-chip EHCI controller.
@@ -451,6 +452,14 @@ config USB_OHCI_SH
 
 	  Enables support for the on-chip OHCI controller on the SuperH.
 	  If you use the PCI OHCI controller, this option is not necessary.
+
+config USB_OHCI_S5P
+	boolean "S5P OHCI support"
+	depends on PLAT_S5P
+        select S5P_DEV_USB_OHCI
+	help
+	 Enable support for the Samsung S5P SOC's on-chip OHCI controller.
+
 
 config USB_OHCI_EXYNOS
 	boolean "OHCI support for Samsung EXYNOS SoC Series"

@@ -3,7 +3,21 @@
 
 版本u-boot-2014.04
 
-uboot流程:
+/*************************** uboot 与相关linux 基础 **********************************/
+
+内核编译后 得的 uImage 与 zImage 的区别:
+	uImage 只是比 zImage 多了一个 0x40 大小的头, 越过这个头,执行uImage的内容与执行zImage没有区别.
+
+编译好的linux内核包括:cpu板级的硬件初始化内容,还有linux自身内核内容vmlinux,
+
+bzImage 与 zImage 功能格式框架属性,压缩属性是一样的,不过bzImage表示是大型的zImage,表示包含更多内容的内核
+
+vmlinuz (注意最后字母是Z), 其实就是 zImage 或者是 bzImage
+
+
+
+/*************************** uboot流程 **********************************/
+
 spl:
 /arch/arm/cpu/armv7/start.S:reset
 	->save_boot_params	//保存启动参数
@@ -987,19 +1001,6 @@ save		//然后命令参数便存入了环境变量里,存到nandflash里
 
 
 
-
-工作用到:
-set bootargs root=/dev/nfs nfsroot=192.168.2.208:/home/kingders/smart210/kernel/kernel2/rootfs ip=192.168.2.120:192.168.2.208:192.168.2.1:255.255.255.0 console=ttySAC0,115200n8 mem=64m
-
-setenv bootmenu_0 "start0=tftp 20000000 uImage; bootm"
-
-set serverip 192.168.2.208
-
-set machid 998 
-
-saveenv
-
-setenv bootargs noinitrd root=/dev/nfs nfsroot=192.168.0.105:/home/hgq/nfs,tcp ip=192.168.0.135:192.168.0.105:192.168.0.1:255.255.255.0::eth0:off init=/linuxrc console=ttySAC0,115200
 
 
 

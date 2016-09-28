@@ -12,6 +12,15 @@ set serverip 192.168.2.208
 set machid 998 
 saveenv
 
+/**************************** command line *********************************/
+linux不一定就要使用,uboot或者其他bootloader传递的 command line 参数 还可以用自身的宏定义默认的command line 参数
+	方法一:做好编译配置后,修改 .config 的CONFIG_CMDLINE 再编译内核
+	方法二:make menuconfig 里 按"/"然后搜索 CMDLINE 找出相关项进行配置,
+如果设置成用自身的 commandline 则 uboot bootargs 写不写 也 也无所谓.
+
+
+
+
 /**************************** 裁剪 *********************************/
 arch/arm/只留下的mach-xx为mach-s5pv210,
 且arch/arm/Kconfig留下:

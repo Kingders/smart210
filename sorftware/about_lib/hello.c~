@@ -1,0 +1,6 @@
+#include <linux.h>
+
+int main(void)
+{
+	printf("hahahahha");
+}

@@ -1,0 +1,45 @@
+/*************************** 动静态函数库 **************************/
+
+.so 是动态函数库,.a是静态函数库,
+
+linux 下编译链接默认为动态函数库.如果使用静态库链接,使用编译选项 -static: gcc -static test.c -o test  (-o 指定输出文件名字test)
+如果编译时出现错误: cannot find -lc 指没有发现libc.a, l为lib简写
+
+reedeld -d xxx 读出xxx使用了那些静态函数库
+
+制作静态函数库:
+gcc -c aaa.c -o aaa.o	编译出aaa.o执行文件
+ar cqs libmylib.a aaa.0	打包到静态库 libmylib.a
+拷贝 到 系统库目录 /usr/lib 里
+
+gcc -static test.c -o test	相当于 gcc -static test.c -lc -o test	默认情况 编译只链接到静态c库, 
+要使用别的静态态库,则要明确指出: gcc -static test.c -lmylib -o test	
+
+gcc test.c -o test	相当于 gcc test.c -lc -o test	默认情况 编译只链接到动态c库, 
+要使用别的动态态库,则要明确指出: gcc test.c -lmylib -o test	
+
+制作动态函数库:
+gcc -c aaa.c -o aaa.o	编译出aaa.o执行文件
+gcc -shared -fPIC aaa.0	libmylib.so 打包到动态库 libmylib.so (-fPIC表示输出对象模块是按照可重定位地址方式生成的)
+拷贝 到 系统库目录 /usr/lib 里
+
+/*************************** 系统调用_文件编程 **************************/
+见file_ops例子
+这里使用的是linux 系统调用的函数操作.
+/*************************** 库函数_文件编程 **************************/
+见libc_file_ops例子
+这里使用c函数库操作,方便,window inux 移植
+函数先打开并操作一个流,并不是直接操作文件.
+
+/*************************** 时间编程 **************************/
+
+
+
+
+
+
+
+
+
+
+

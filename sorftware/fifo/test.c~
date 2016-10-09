@@ -1,0 +1,52 @@
+/***************************************
+*
+*
+*
+*
+*
+*
+****************************************/
+
+
+#include <unistd.h>	//getpid()
+#include <sys/types.h>	//getpid()
+
+#include <stdio.h>
+
+#include <sys/types.h>	//mkfifo()
+#include <sys/stat.h>	//mkfifo()
+
+#define MSDATA		"hello"		//父给子进程数据
+#define MSDATA_SIZE	sizeof(MSDATA)		//计算字符串字节数,自动多算一个字符串结束符NULL
+
+#define SMDATA0		"jiuhygfd"		//子给父进程数据
+#define SMDATA1		"hahahaha"		//子给父进程数据
+#define SMDATA2		"bbbbbbbb"		//子给父进程数据
+#define SMDATA_SIZE	sizeof(SMDATA0)		//计算字符串字节数,自动多算一个字符串结束符NULL
+
+#define FIFOPATH	"./fifo1"
+
+int main (void)
+{
+	pid_t hpid; //getpid获得
+	pid_t pid; //fork返回
+	char rbuffer[20];
+	
+	int fifofd;
+	char *path;
+
+	/**** hostpid ****/
+	hpid = getpid();	
+	printf("host pid %d\n\r",((int)hpid));
+	printf("\n\r");
+
+	/**** fifo() ****/
+	
+	path = FIFOPATH;
+	mkfifo(path,0666);
+
+	fifofd = open(path,WRONLY);
+	write(fifofd,MADATA,MSDATA_SIZE);
+
+	return 0;
+}

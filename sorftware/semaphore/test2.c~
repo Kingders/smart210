@@ -34,9 +34,10 @@ int main (void)
 	fd = open("./board.txt",O_RDWR|O_APPEND);			//并不执行没有时新建,所以自己人为先建一个
 
 	//获取信号量
-	sops[0] = (struct sembuf){.sem_num = 2,
-		   .sem_op = -1};
-	sops[1] = (struct sembuf){0,-1};
+	sops[0] =(struct sembuf){.sem_num = 2,
+		   .sem_op = -1,
+		   .sem_flg= IPC_UNDO};
+	sops[1] = (struct sembuf){0,-1,IPC_UNDO};
 	ret = semop(semid,sops,2);			//这里操作获取两个信号量
 	if(ret == -1)
 		perror("semop_getsem");

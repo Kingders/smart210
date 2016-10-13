@@ -9,8 +9,9 @@
 *	struct senbuf{
 *		sem_num,	//某个信号量的编号
 *		sem_op,		//由于信号量获取是-1操作,释放是+1操作,所以这个的值, 正值表示释放信号+1,负值表示获取信号量-1,
-*		sem_flg,	//IPC_NOWAIT:对信号的操作不能满足时，semop()不会阻塞，并立即返回，同时设定错误信息。
-*				//IPC_UNDO:程序结束时(不论正常或不正常)，保证信号值会被重设为semop()调用前的值。
+*		sem_flg,	//一般选IPC_UNDO
+*				//IPC_NOWAIT:对信号的操作不能满足时，semop()不会阻塞，并立即返回，同时设定错误信息。
+*				//SEM_UNDO:程序结束时(不论正常或不正常)，保证信号值会被重设为semop()调用前的值。
 *				//这样做的目的在于避免程序在异常情况下结束时未将锁定的资源解锁，造成该资源永远锁定。
 *	}
 *	一般操作多个信号的方式如下:
@@ -86,8 +87,9 @@ int main (void)
 	//sops[1] = (struct sembuf){0,-1,IPC_NOWAIT};
 	//也可以这样
 	sops[0] =(struct sembuf){.sem_num = 2,
-		   .sem_op = -1};
-	sops[1] = (struct sembuf){0,-1};
+		   .sem_op = -1,
+		   .sem_flg= SEM_UNDO};
+	sops[1] = (struct sembuf){0,-1,SEM_UNDO};
 	//不可以这样	
 	//sops = ((struct sembuf[2]){{2,-1},{0,-1}});
 

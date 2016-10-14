@@ -3,7 +3,7 @@
 *线程退出不能用exit,否则,其所属于整个进程,和进程创建的线程们都退出,新城退出使用:pthread_exit
 *
 *
-*pthread_create(*thread,*attr,函数指针,*arg)	//创建新的线程, 成功返回0,失败返回错误编码.
+*pthread_create(*thread,*attr,函数指针,void *arg)	//创建新的线程, 成功返回0,失败返回错误编码.
 *						//*thread:新线程的id最后会存在这
 *						//*attr:linux系统待创建线程的的属性,NULL时,使用默认属性
 *						//线程执行的函数,线程创建后,直接从这个函数开始执行
@@ -35,36 +35,36 @@
 *	      添加互斥锁保护一个全局累加器,每个线程加一后显示当前值,保证同一个值不被显示两次,
 *	      (如果不保护,有可能,线程1加一后,还没有printf,线程2也加了一,最后线程12都printf了同一个值)
 *	方案二:使用条件变量代替 方案一 实现同步操作.
-	       原理: 线程2检测是否满5个产品,不满足就沉睡,线程1做满5个产品便唤醒线程2,
-		     线程2唤醒后并不直接取得睡眠时释放的互斥锁,而是要重新竞争获得,
-		     为了保证线程2唤醒后便获得锁,得尽量避免此时有其他线程与线程2竞争锁.
-	       最后,尽量保证 pthread_cond_wait() 先于 pthread_cond_signal() 执行!!
-
-测试内容:1,基本线程工作 (实现)
-	 2,使用互斥锁   (实现)
-	 3,使用条件变量 (实现)
-	 4,线程参数,以及返回值 (未实现)
-
-
-编译调试:
-	1,当线程执行函数格式非常严格:void *thread1(void *data) //返回值是空类型指针,参数是空类型指针参数,尽管我们不需要参数
-	  如果,这样:void *thread1(void),则会编译出错(虽然实际上这样更符合我们不需要参数的情形):
-		warning: passing argument 3 of ‘pthread_create’ from incompatible pointer type [enabled by default]
-	2,编译命令: gcc -pthread test.c -o test 才正确, 通过man pthread_create 发现
-	   gcc -lpthread test.c -o test 错误,-lpthread 是古老版本库文件的编译项,现在用不着
-
-
-
-
-
-
+*	       原理: 线程2检测是否满5个产品,不满足就沉睡,线程1做满5个产品便唤醒线程2,
+*		     线程2唤醒后并不直接取得睡眠时释放的互斥锁,而是要重新竞争获得,
+*		     为了保证线程2唤醒后便获得锁,得尽量避免此时有其他线程与线程2竞争锁.
+*	       最后,尽量保证 pthread_cond_wait() 先于 pthread_cond_signal() 执行!!
+*
+*测试内容:1,基本线程工作 (实现)
+*	 2,使用互斥锁   (实现)
+*	 3,使用条件变量 (实现)
+*	 4,线程参数,以及返回值 (测试返回 出现了Segmentation fault (core dumped) 错误)
+*	   用这个错误测试其他纠错工具 gdb core文件等等!!
+*
+*
+*
+*编译调试:
+*	1,当线程执行函数格式非常严格:void *thread1(void *data) //返回值是空类型指针,参数是空类型指针参数,尽管我们不需要参数
+*	  如果,这样:void *thread1(void),则会编译出错(虽然实际上这样更符合我们不需要参数的情形):
+*		warning: passing argument 3 of ‘pthread_create’ from incompatible pointer type [enabled by default]
+*	2,编译命令: gcc -pthread test.c -o test 才正确, 通过man pthread_create 发现
+*	   gcc -lpthread test.c -o test 错误,-lpthread 是古老版本库文件的编译项,现在用不着
+*	3,测试线程2不能正常返回值,然贺实现返回方式与线程1无疑.	printf("%s\n",*rcv2);出现:Segmentation fault (core dumped)错误
+*
+*
+*
+*
+*
 **************************************************/
 #include <pthread.h>
 
 #include <sys/types.h>	//ftok()
 #include <sys/ipc.h>	//ftok()
-#include <sys/msg.h>	//
-
 
 #include <string.h>   //strncpy() strncmp()
 
@@ -72,8 +72,10 @@
 #include <stdlib.h>  //exit() scanf()
 #include <string.h>  //strlen()
 
-
 #include <unistd.h>  //sleep()
+
+//#include <linux/kprobes.h>	//dump_stack()
+//#include <asm/traps.h>	//dump_stack()
 
 
 pthread_t thread[2];		//线程描述符
@@ -85,6 +87,8 @@ pthread_cond_t cond = PTHREAD_COND_INITIALIZER;		//初始化一个条件变量�
 
 void *thread1(void *data)
 {
+	char *s1 = "thread1 return mio";
+	printf("%s\n",(char*)data);	//测试线程的参数传递
 #if 0	//方案一
 
 	int i = 0;
@@ -147,11 +151,14 @@ void *thread1(void *data)
 #endif	//方案二
 	
 	printf("thread1:over \n"); //线程退出前消息
-	pthread_exit(NULL);	//线程退出 
+	//pthread_exit(NULL);	//线程退出 
+	pthread_exit(s1);	//线程退出,返回返回值
 }
 
 void *thread2(void *data)
 {
+	char *s2 = "thread2 return yui";
+	printf("%s\n",(char*)data);	//测试线程的参数传递
 #if 0	//方案一
 
 	int j = 0;
@@ -212,22 +219,38 @@ void *thread2(void *data)
 #endif	//方案二	
 
 	printf("thread2:over \n"); //线程退出前消息
-	pthread_exit(NULL);	//线程退出 
+	//pthread_exit(NULL);	//线程退出
+	pthread_exit(s2);	//线程退出,返回返回值
 }
 
 
 int main (void)
 {
+	char *string1 ="thread1 use for product";
+	char *string2 ="thread2 use for consume";
+
+	char **rcv1;
+	char **rcv2;
+	
 	pthread_mutex_init(&mut,NULL);			//初始化互斥锁 
 
-	pthread_create(&thread[0],NULL,thread1,NULL);	//创建线程thread1
-	pthread_create(&thread[1],NULL,thread2,NULL);	//创建线程thread2
+	//pthread_create(&thread[0],NULL,thread1,NULL);	//创建线程thread1
+	//pthread_create(&thread[1],NULL,thread2,NULL);	//创建线程thread2
 
-	pthread_join(thread[0],NULL);			//等待thread1结束
-	pthread_join(thread[1],NULL);			//等待thread2结束
+	pthread_create(&thread[0],NULL,thread1,(void*)string1);	//创建线程thread1,并传递了参数
+	pthread_create(&thread[1],NULL,thread2,(void*)string2);	//创建线程thread2.并传递了参数
+
+	//pthread_join(thread[0],NULL);			//等待thread1结束
+	//pthread_join(thread[1],NULL);			//等待thread2结束
+
+	pthread_join(thread[0],(void **)rcv1);			//等待thread1结束,并得到返回值放在 **rcv1
+	pthread_join(thread[1],(void **)rcv2);			//等待thread2结束,并得到返回值放在 **rcv2
+
+	printf("%s\n",*rcv1);	//测试线程1返回值
+	printf("%s\n",*rcv2);	//测试线程2返回值
 
 	printf("over\n");		//进程结束前标记
-	return 0;
+	return 0;	
 }
 
 

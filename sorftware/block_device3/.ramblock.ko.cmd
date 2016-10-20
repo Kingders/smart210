@@ -1,0 +1,1 @@
+cmd_/home/kingders/smart210/sorftware/block_device3/ramblock.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/kingders/smart210/sorftware/block_device3/ramblock.ko /home/kingders/smart210/sorftware/block_device3/ramblock.o /home/kingders/smart210/sorftware/block_device3/ramblock.mod.o

@@ -1,0 +1,94 @@
+/*************************************************************
+
+工作队列描述结构:
+(kernel/woekqueue.c)
+struct workqueue_struct {	//工作队列描述结构
+	...
+(include/linux/workqueue.h)
+struct work_struct (		//工作描述结构
+	...
+	work_func_t func;	//工作要执行的函数
+
+使用:
+创建工作队列: create_workqueue
+(include/linux/workqueue.h)
+#define create_workqueue(name)						\
+创建工作: INIT_WORK
+(include/linux/workqueue.h)
+#define INIT_WORK(_work, _func)						\
+提交工作: queue_work
+(include/linux/workqueue.h)
+static inline bool queue_work(struct workqueue_struct *wq,
+			      struct work_struct *work)
+
+
+**************************************************************/
+
+
+//linux模块加载使用的头文件
+#include <linux/module.h>
+#include <linux/init.h>
+//其他需要的头文件
+#include <linux/workqueue.h>
+#include <>
+#include <>
+
+struct workqueue_struct *q;	//工作队列指针
+
+struct work_struct *w1, *w2, *w3;	//工作指针	
+
+void work1_func (struct work_struct *work)
+{
+	printk("this is work 1");
+}
+
+void work2_func (struct work_struct *work)
+{
+	printk("this is work 2");
+}
+
+void work3_func (struct work_struct *work)
+{
+	printk("this is work 3");
+}
+
+
+static int workqueue_init(void)
+{
+	//创建名字为sample的工作队列
+	q = create_workqueue("sample");		
+
+	//创建工作w1
+	w1 = kmalloc(sizeof(struct work_struct),GFP_KERNEL);
+	INIT_WORK(w1, work1_func);
+
+	//创建工作w2
+	w2 = kmalloc(sizeof(struct work_struct),GFP_KERNEL);
+	INIT_WORK(w1, work2_func);
+
+	//创建工作w2
+	w3 = kmalloc(sizeof(struct work_struct),GFP_KERNEL);
+	INIT_WORK(w1, work3_func);
+
+	//提交工作
+	queue_work(q,w1);
+	queue_work(q,w3);
+	queue_work(q,w2);
+	queue_work(q,w1);
+
+	return 0;
+}
+
+static int workqueue_exit(void)
+{
+	vfree(w1);
+	vfree(w2);
+	vfree(w3);
+
+	return 0;
+}
+
+MODULE_LICENSE("GPL");
+
+module_init(chardev_init);
+module_exit(chardev_exit);

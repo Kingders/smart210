@@ -13,6 +13,7 @@
 #ifndef __ASM_ARCH_GPIO_H
 #define __ASM_ARCH_GPIO_H __FILE__
 
+
 /* Practically, GPIO banks up to MP03 are the configurable gpio banks */
 
 /* GPIO bank sizes */

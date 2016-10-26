@@ -297,6 +297,14 @@ sed解析命令;
 awk分析器:(未完待续)
 
 
+
+
+
+
+
+
+////////////////////////////以下讨论的功能函数,都只适用在内核进程,内核模块,而不适用于用户进程
+
 /*************************** 字符设备驱动 **************************/
 
 
@@ -450,43 +458,127 @@ linux链表,链成员也由内容域和指针域组成,但是,指针域的指针
 
 
 
-/*************************** 按键驱动: linux中断, 工作队列, 内核定时器 等待队列 **************************/
+/*************************** linux中断 按键程序 **************************/
+
+混杂设备,字符设备的分支 主设备号一定为10! 所有混杂设备形成一个链表,访问设备时,linux根据次设备号查找相关并执行.
+
+例子见button
+
+
+linux中断:
+linux中断的一般流程,中断发生 -> 统一入口 irg_SVC -> 得到中断号 ->通过中断号寻找 对应 irq_desc结构数据 -> 然后找到action里的中断处理函数
+共享中断的概念:多个硬件使用同一个中断号,多个中断处理函数挂到同一个irq_desc里,某个硬件触发中断时,这里的所有中断函数都要执行,
+	      所以使用共享中断的硬件的中断函数一定要做自我检测,当中断处理函数执行时,先检测是否自己的硬件引发中断,不是就马上结束,
+	      让下一个中断函数执行....
+	      使用 共享中断的硬件 通过 dev_id 注册注销自己的中断处理函数
+设备驱动需要做的事:写出中断处理函数 -> 注册到linux系统里,注册到指定的 irg_desc结构里.
+中断处理函数,不能引起阻塞,不能引起调度.因为中断程序进程认为在另一个维度(中断上下文)运行的,与普通进程不一样,如果阻塞,
+则系统不会自动跳出中断上下文回到普通的进程环境执行.于是系统死机.
+
+linux 有快速中断和慢速中断快速中断指,中断进行时,下一个中断发生时会被忽略,
+慢速中断中,相同类型中断发生时,迟到的会被忽略掉,不同类型时,会打断相继发生
+
+
+两类中断机制!!!
+两者只能选其一,6410只可以使用其中一类中断,但是要配置cp15处理器来选择其中一类,而210的一部分中断使用第一类,另一部分使用另一类,所以不需配置
+第一类是,中断向量类,
+就是,所有中断都先通过统一的入口,中断向量表的irq这个入口开始,然后查找相关的中断函数执行
+第二类是,vic模块类,
+就是,中段vic硬件模块实现,就是对应中断发生,vic硬件检测到,然后直接从vic对应的address寄存器取出中断处理函数的地址并前往执行,
+相对第一类,执行速度更快.
+先裸机参考no_os里的代码
+
+
+/*************************** 工作队列 **************************/
+
+工作队列描述结构:
+struct workqueue_struct {	//工作队列描述结构
+	...
+struct work_struct (		//工作描述结构
+	...
+	work_func_t func;	//工作要执行的函数
+
+使用:
+创建工作队列: create_workqueue
+创建工作: INIT_WORK
+提交工作: queue_work
+
+见workqueue例子
+
+
+/*************************** 内核定时器 **************************/
+
+定时器事件:当时钟到达未来某个时间点时,触发并执行一项任务
+这个未来的时间点有点特别!!
+自内核运行起来后,计算机运行在主频上,例如 2.5GHZ, 而 1秒/2.5GHZ = 一个时钟周期经历的时间,就是1hz经历的时间
+而 0.01GHZ 经历的时间,我们称为 一个单位时间
+内核运行起来后,内核统计着计算机到目前为止所有经历的单位时间总数,通过jiffies宏显示.
+而这里未来的时间点表示:到达未来的某个 单位时间后,并执行一项任务,
+未来的某个单位时间 - 目前为止所有经历的单位时间总数 = 一段定时器事件触发前等待的时间
+
+另外宏 HZ 也是以 单位时间 为单位 2.5GHZ主频 对应宏HZ为250
+
+(include/linux/timer.h)
+struct timer_list {						//定时器事件描述结构
+	...
+	unsigned long		expires;			//定时器未来时间点,单位见上
+								//
+	void			(*function)(unsigned long);	//执行函数
+
+
+初始化一个定时器事件.
+(include/linux/timer.h)
+#define init_timer(timer)						\
+
+add_timer 注册定时器事件到linux内核
+(kernel/time/timer.c)
+void add_timer(struct timer_list *timer)
+
+
+mod_timer 设置事件未来时间点并执行一次定时器顺数事件 
+再次 mod_timer 再次设置事件未来时间点并执行新一次定时器顺数事件
+(include/linux/timer.h)
+extern int mod_timer(struct timer_list *timer, unsigned long expires);
+
+(include/linux/raid/pq.h)
+# define jiffies	raid6_jiffies()
+
+
+/*************************** 等待队列 **************************/
+
+(include/linux/wait.h)
+struct __wait_queue_head {
+	spinlock_t		lock;
+	struct list_head	task_list;
+};
+typedef struct __wait_queue_head wait_queue_head_t;	//等待队列描述结构
+
+
+#define init_waitqueue_head(q)				\	//初始化等待队列
+
+#define DECLARE_WAIT_QUEUE_HEAD(name) \			//定义 并 初始化等待队列
+
+#define wait_event(wq, condition)			//进入等待队列,condition是bool变量,为假时,当前进程进入等待队列
+							//并进入TASK_UNINTERRUPTIBLE状态休眠,只可以被 wake_up() 唤醒
+							//wq 为 wait_queue_head_t q
+
+#define wait_event_interruptible(wq, condition)		//进入等待队列,condition是bool变量,为假时,当前进程进入等待队列
+							//并进入TASK_INTERRUPTIBLE状态休眠,可以被 信号 和 wake_up()唤醒
+							//wq 为 wait_queue_head_t q
+
+#define wait_event_killable(wq, condition)		//进入等待队列,condition是bool变量,为假时,当前进程进入等待队列
+							//并进入TASK_KILLABLE状态休眠,可以被 wake_up() 唤醒
+							//与TASK_UNINTERRUPTIBLE 唯一不同,可以接受致命kill(ctrl+c)信号,唤醒进程
+							//wq 为 wait_queue_head_t q
+
+#define wake_up(x)	__wake_up(x, TASK_NORMAL, 1, NULL)	//可以唤醒TASK_UNINTERRUPTIBLE,TASK_INTERRUPTIBLE,TASK_KILLABLE等所有进程
+								//x为 wait_queue_head_t *q
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#define wake_up_interruptible(x)	__wake_up(x, TASK_INTERRUPTIBLE, 1, NULL)	//只可以唤醒TASK_INTERRUPTIBLE,的进程
+											//x为 wait_queue_head_t *q
+ (未完待续,关于内核模块,多进程,和共享数据的 疑惑)
 
 
 

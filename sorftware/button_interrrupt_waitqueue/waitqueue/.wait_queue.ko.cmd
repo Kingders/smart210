@@ -1,0 +1,1 @@
+cmd_/home/kingders/smart210/sorftware/waitqueue/wait_queue.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/kingders/smart210/sorftware/waitqueue/wait_queue.ko /home/kingders/smart210/sorftware/waitqueue/wait_queue.o /home/kingders/smart210/sorftware/waitqueue/wait_queue.mod.o

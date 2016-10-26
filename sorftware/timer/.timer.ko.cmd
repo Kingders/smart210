@@ -1,0 +1,1 @@
+cmd_/home/kingders/smart210/sorftware/timer/timer.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/kingders/smart210/sorftware/timer/timer.ko /home/kingders/smart210/sorftware/timer/timer.o /home/kingders/smart210/sorftware/timer/timer.mod.o

@@ -1,0 +1,76 @@
+/*************************************************************
+
+模型1:init->funca->wait_event->这时modinit还没有完全实现便永久阻塞在TASK_UNINTERRUPTIBLE,所以建议使用wait_event_killable,
+起码阻塞在TASK_KILLABLE 可以使用ctrl+c结束
+
+使用内核的初始化模块来进行wait_queue并不明智,因为,模块初始化函数一般不能fork()出多进程
+
+
+**************************************************************/
+#include <unistd.h>	//fork() vfork() getpid() execl()
+#include <sys/types.h>	//vfork() getpid() wait()
+#include <stdlib.h>	//exit()
+#include <sys/wait.h>	//wait()
+
+#include <stdio.h>
+
+//#include <linux/kern_levels.h>		//printk()	
+#include <linux/kernel.h>		//printk()	
+#include <linux/wait.h>	
+#include <linux/sched.h>		//关于TASK_UNINTERRUPTIBLE 一类宏
+//#include <linux/vmalloc.h>		//kmalloc, 用vfree()
+//#include <linux/slab.h>		//kmalloc,在cache分配空间, 用kfree()
+
+//wait_queue_head_t wq1;		//定义一条等待队列
+struct __wait_queue_head wq1;
+
+static int c = 0;	
+
+
+void funca (void)
+{
+	printf("fa 1\n");
+	wait_event_killable(&wq1, c);
+	printf("fa c:%d\n",c);
+	exit(1);
+}
+
+void funcb (void)
+{
+	printf("fb 1\n");
+	c += 2;
+	wake_up(&wq1);
+	printf("fb c:%d\n",c);
+	exit(1);
+}
+
+void funcc (void)
+{
+	printf("fc 1\n");
+	wait_event_killable(&wq1, c);
+	printf("fc c:%d\n",c);
+	exit(1);
+}
+
+
+int main(void)
+{
+	printf("start\n");
+
+	//初始化等待队列wq1
+	init_waitqueue_head(&wq1);
+
+	//定义并初始化等待队列wq2
+	//DECLARE_WAIT_QUEUE_HEAD(wq2); 
+
+	if (!fork())	//子进程1
+		funca();
+	if (!fork())	//子进程2
+		funcc();
+	sleep(4);
+	if (!fork())	//子进程3
+		funcb();
+
+	return 0;
+}
+

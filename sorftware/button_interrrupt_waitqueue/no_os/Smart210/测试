@@ -1,0 +1,6 @@
+make
+./mk219 gboot.bin 210.bin
+sudo dd iflag=dsync oflag=dsync if=210_1.bin of=/dev/sdb seek=1
+现象,按key0亮,按key1灭,但过一段时间后,死机 
+
+另外,源代码里好多错误,寄存器地址与名称不相符

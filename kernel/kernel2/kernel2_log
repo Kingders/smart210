@@ -5,10 +5,11 @@
 
 /**************************** 最新状态 *********************************/
 uboot1 nfs 启动内核:
-uboot1:(nfs改到smart210/rootfs下) (pc的ip变了192.168.2.208)
-set bootargs noinitrd root=/dev/nfs nfsroot=192.168.2.208:/home/kingders/smart210/rootfs/rootfs1 ip=192.168.2.120:192.168.2.208:192.168.2.1:255.255.255.0::eth0:off console=ttySAC0,115200n8 mem=64m
+uboot1:(nfs改到smart210/rootfs下) (pc的ip变了192.168.0.116)
+set bootargs noinitrd root=/dev/nfs nfsroot=192.168.0.116:/home/kingders/smart210/rootfs/rootfs1 ip=192.168.0.200:192.168.0.116:192.168.0.1:255.255.255.0::eth0:off console=ttySAC0,115200n8 mem=64m
 setenv bootmenu_0 "start0=tftp 20000000 uImage; bootm"
-set serverip 192.168.2.208
+set serverip 192.168.0.116
+set ipaddr 192.168.0.200
 set machid 998 
 saveenv
 

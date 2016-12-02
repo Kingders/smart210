@@ -297,6 +297,201 @@ sed解析命令;
 awk分析器:(未完待续)
 
 
+/*************************** select 阻塞IO 多路复用 **************************/
+
+阻塞io :一般指,调用的函数想得到某些资源,却暂时不能访问资源,于是整个进程暂停阻塞在此处,直到能够得到资源才会执行进程下一步操作
+
+多路复用:一个进程要处理 多种并行,不连续的没有先后次序,一定程度上相互独立的事物, 这些事物对于进程来说是多路,这个进程对于这些事物来说是复用
+	
+多路复用的例子:	一个进程,要读取多个 fifo 的内容,
+		一个进程,要处理tcp,也要处理udp.
+
+另外通过学习,知道,什么对于一个进程来说,fifo socker,普通文件...等,共用一套文件描述符号!!!
+	比喻打开A普通文件时返回文件描述符号值为 1 ,
+	当接着打开fifo时的符号值就不能为1,只能为1以后,例如 2 ;
+	接着建立socker时的符号值也不能为 1,和 2, 只能为 1,2,以后,例如 3 ;
+
+
+select机制,先把希望访问的资源的文件描述符,加入到待访问队列,
+	执行select时, select 会不断阻塞在不断轮询待访问队列里的成员,
+	当一次轮训下来,发现没有满足条件的,执行下一次轮询,
+	当一次轮训下来发现某个,或某几个成员达到条件时,把这些成员标记就绪.然后完成select跳出
+	用户从队列中标记的成员执行操作
+使用指南:
+	int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+	nfds: 待访问队列里,文件描述符号值fd最大的成员的 fd值+1=nfds
+	readfds: 读就绪标记位的位置,
+	writefds: 写就绪标记位的位置,
+	exceptfds: 执行就绪标记位的位置
+		(fd_set是就绪标记位类型,如果fd_set类变量为16格字节,表示,允许文件描述符号值fd 0 ~ 255 的资源加入 待访问队列,
+		 例如,fifo1 文件描述符值为 46,由于处于0 ~ 255,所以可以加入 等待读访问队列里,当select 探测到fifo1有内容可读时,
+		 readfds 指向的 fd_set 变量的第 46 位,将标记为 0 !!,即告诉用户可以读取fifo1内容了,访问完成后,记得给 这个第46位 置 1,
+		 如果不置 1 ,保持 0,下次select时,轮询到第 46 个成员时直接跳过,并不检测fifo1是否可读.
+	struct timeval {
+		long    tv_sec;         /* seconds */
+		long    tv_usec;        /* microseconds */
+	};	//select将等待的时间,如果,在这段时间里轮询还是没有找到,就绪可访问的资源时,就结束select,不再处理
+		//填 NULL 表示,无限轮询等待下去,直到找到就绪可访问的资源为止.
+	总计,select的轮询特性:	每一轮轮询都是从成员的 fd = 0 开始,到 fd = nfds-1 结束,
+				轮询每一个成员时,先检查对应 fd_set 对应位是否为1,若为零则跳过该项检测,
+				若对应位为 1, 检测该项是否就绪,若就绪就清零,否则,保持为 1 .
+
+例子;
+	//处理一堆可读的 fifo,和socker
+	int sockfd = 0;
+	int confd = 0;
+	int i = 0, j = 0;
+	fd_set fd_read[2];		//设置两个fd_set,fd_read[0]记录初始状态,fd_read[1]用于记录select结果
+	int clifd[FD_SETSIZE]; 	//要加入读功能待访问队列 的 文件描述符队列
+	......
+	FD_ZERO(&fd_read[0]); 	//清空fd_read[0]所有位
+	FD_SET(sockfd0, &fd_read[0]); //将sockfd0添加到fd_read[0]描述集中，也就是说将sockfd对应的fd_read[0]位中 置 1
+	FD_SET(fifo0, &fd_read[0]); 
+	FD_SET(sockfd1, &fd_read[0]);
+	FD_SET(fifo0, &fd_read[0]); 
+	.......				//fd_read[0]记录了初始状态
+	fd_read[1] = fd_read[0];	//拷贝初始态到用于selec()操作的fd_read[1]
+	clifd[0] = sockfd0,	//用户整理文件描述符,方便后续使用
+	clifd[1] = fifo0,
+	clifd[3] = sockfd1,
+	clifd[4] = fifo1,
+	......
+	for(...)
+	{	
+		fd_read[1] = fd_read[0];	//恢复fd_read[1]到初始态,
+		//select轮询资源的可读情况,阻塞进程,直到有资源就绪,可读时,返回,同时,fd_read[1]也相应改变.
+		ret = select(max_fd(clifd, FD_SETSIZE) + 1, &fd_read[1], NULL, NULL, NULL);
+		//处理
+		if(FD_ISSET(sockfd0, &fd_read[1]));	//检查就绪情况,实际操作检查对应位是否被 select() 清零,若被清零,表示资源可读
+			{读访问等操作...}
+		if(FD_ISSET(fifo0, &fd_read[1]));
+			{读访问等操作...}
+		.......
+	}
+	//清除待访问队列
+	FD_CLR(sockfd0, &fd_read[0]);	//把sockfd0在fd_read[0]对应位清零，意义相当于从select()检测的等待访问队列里踢出sockfd0,
+	FD_CLR(fifo0, &fd_read[0]);	//然而在这 例子 并没有什么用,因为select()操作的是fd_read[0]的副本fd_read[1],
+	FD_CLR(sockfd1, &fd_read[0]);	//而且有可能select(),已经对这项清零了,所以清除待访问队列这个步骤,没有多少实际意义
+	FD_CLR(fifo0, &fd_read[0]); 	//只能认为是 用于认识 FD_CLR() 这个函数功能
+	.....
+
+
+/*************************** epoll 阻塞IO 多路复用 **************************/
+
+epoll是一个更好的多路复用机构,对比select来说,select阻塞自身进程时,是不停地轮询,直到遇到就绪的资源,轮询占据cpu资源
+而epoll并非通过轮询而是与中断相关的技术, 阻塞自身进程时,也休眠进程,释放cpu,当有资源就绪时会唤醒进程,继续执行
+
+重申 fd 对于fifo socker 普通文件 等等 是共用的一套资源,某一个fifo用了某个号码,新一个socker就不能用这个号码,以此类推 
+
+
+int epoll_create(int size);
+	创建一个epoll特殊文件并返回 对应文件描述符符号fd,
+	即与打开了的fifo 普通文件 创建了的socker一样占据一个fd,
+	由于也算是一个打开了的文件,所以进程结束时要调用 close() 关闭并释放空间.
+	在旧版内核,size 表示要监听多少个事件,epoll文件会预划分多少个存放事件数据的空间, 
+	在新版内核,size 被忽略,因为内核会实时动态分配空间,所以size这个参数 并没有什么用
+int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
+	epfd: 是 epoll特殊文件的文件描述符符号
+	op:操作宏参数:	EPOLL_CTL_ADD：注册新的 要监听的fd 到epfd中；
+			EPOLL_CTL_MOD：修改已经注册的 fd 的监听事件；
+			EPOLL_CTL_DEL：从epfd中删除一个fd；
+	fd:被op操作的 fd  
+	event: fd被监听的事件内容:
+           typedef union epoll_data {
+               void        *ptr;
+               int          fd;		//被监听事件面向的fd,即与上述 被op操作的fd一致
+               uint32_t     u32;
+               uint64_t     u64;
+           } epoll_data_t;
+
+           struct epoll_event {
+               uint32_t     events;     //被监听哪一些事件,即被监听的类型,见下述
+               epoll_data_t data;       
+           };
+		events:被监听的类型
+			EPOLLIN ：表示对应的文件描述符可以读（包括对端SOCKET正常关闭）；	
+			EPOLLOUT：表示对应的文件描述符可以写；
+			EPOLLPRI：表示对应的文件描述符有紧急的数据可读（这里应该表示有带外数据到来）；
+			EPOLLERR：表示对应的文件描述符发生错误；
+			EPOLLHUP：表示对应的文件描述符被挂断；
+			EPOLLET： 将EPOLL设为边缘触发(Edge Triggered)模式，这是相对于水平触发(Level Triggered)来说的。
+			EPOLLONESHOT：只监听一次事件，当监听完这次事件之后，如果还需要继续监听这个socket的话，
+				      需要再次把这个socket加入到EPOLL队列里
+int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
+	监听事件,并以休眠的方式阻塞进程,释放cpu资源
+	epfd: 监听操作执行对应的 epoll特殊文件 的fd
+	events: struct epoll_event 结构的数组指针,当某个或某些,监听事件满足条件就绪后,其对应的event结构体变量会压入events数组
+	maxevents: 每次epoll_wait输出就绪监听事件的最大数量,例如某次epoll_wait中有128个事件就绪,但是maxevents为40,
+		   只能输出其中40个监听就绪事件供用户操作,剩下的留着下次epoll_wait,继续输出,因为下次epoll_wait一开始就检测到就绪还没处理的事件
+	timeout:毫秒级别等待时间,当过时还没有监听时间就绪,就唤醒休眠进程,epoll_wait返回 0,
+		填 -1 表示 无限等待,直到有监听事件就绪
+
+epoll多路复用监听深入:
+	首先建立 epoll文件,把要监听的epoll_event结构信息加入文件,epoll_wait开始了阻塞监听
+	epoll_wait先清空了 events数组
+	监听的事件就绪后会像触发中断一样,自动把就绪事件信息顺序传入events数组,
+	每过一段比较短的时间的时间后,epoll_wait检查events是否有内容,若有,就返回events里放入了多少个就绪事件,若没有,继续等待
+	如果设了timeout,且等待到超出 timeout 时也没有就绪事件,便返回0
+	struct epoll_event.events 是一个复用项:(两种 不同的 置1含义)
+		1,在EPOLL_CTL_ADD前,给event.events 中某些位置 1, 表示了 要监听的fd的事件的类型
+		2,查看events[X].events 可以知道是事件的那些监听类型已经就绪了,这些功能项对应位会置1,表示就绪了
+		3,最后,这里与select不一样,就绪了的事件对应的位 置 1了,但是我们没有必要做清零 这一类手动清flag工作.
+
+
+例子:
+	//监听fifo, socker
+	#define MAXEVENTS	40
+	...
+	int epfd;	//epoll特殊文件的 文件描述符符号(与可以叫句柄)fd
+	struct epoll_event evt;		//一个暂存数据的变量
+	struct epoll_event *evts;	//一个放置监听就绪事件 的数组 的指针
+	...
+	epfd = epoll_create(0);	//创建一个epoll文件,参数数字随便填,新版内核直接忽略不用这个参数
+	evts = calloc (MAXEVENTS, sizeof(evt));	//创建一个epoll_event数组,保存返回的就绪的监听事件数据  
+	...
+	while(...)
+	{...
+		//插入 i 个 socker 读访问是否就绪的监听,	
+		for(...)
+		{
+			event.data.fd = sockfd[i];		//填写要监听的 fd
+			event.events = EPOLLIN | EPOLLET;	//填写要监听的事件的类型:能读入访问,边缘触发方式  
+			ret = epoll_ctl (epfd, EPOLL_CTL_ADD, sockfd[i], &event);	//插入监听事件
+		}
+		//又插入 j 个 fifo 读访问是否就绪的监听,	
+		for(...)
+		{
+			event.data.fd = fifo[i];		//填写要监听的 fd
+			event.events = EPOLLIN | EPOLLET;	//填写要监听的事件的类型:能读入访问,边缘触发方式  
+			ret = epoll_ctl (epfd, EPOLL_CTL_ADD, fifo[i], &event);	//插入监听事件
+		}	
+		//epoll阻塞并休眠进程,直到有事件就绪唤醒并返回
+     		n = epoll_wait (epfd, evts, MAXEVENTS, -1);	//有就绪事件时,返回实际传递回来了多少个就绪事件, 
+								//由于各种问题.就绪事件不一定等于实际传递回来的就绪事件不一定等于MAXEVENTS
+								//但是重复调用epoll_wait,总会解决传递完所有甚至上次,上几次未处理的就绪事件
+								//传递回来的就绪事件的信息都会拷贝到evts数组里
+		//轮询解决就绪事件evts[0]
+		if(sockfd{0} == evts[0].data.fd )	//如果fd是sockfd[0]的fd,表示sockfd[0]可以执行读操作/或者边缘操作了
+			sockfd[0]的相关操作...
+		else if(sockfd{i} == evts[0].data.fd )
+			....
+		else if(fifo{j} == evts[0].data.fd )
+			fifo[i]的相关操作...
+		//轮询解决就绪事件evts[1]
+		....
+		//轮询解决就绪事件evts[n]
+	}
+	//进程结束前
+	ret = epoll_ctl (epfd, EPOLL_CTL_DEL, sockfd[0], &event);	//删除监听事件操作,同理这个操作删除所有监听事件
+	,,,
+	close(epfd)	//或者可以不用执行删除监听事件的操作,直接close epfd,一定要有close epfd
+
+
+
+
+
+
+
 
 
 

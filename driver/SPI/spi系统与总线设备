@@ -1,0 +1,1184 @@
+http://blog.csdn.net/apple_guet/article/details/21449231
+
+一、spi总线注册
+
+        这里所说的SPI核心，就是指/drivers/spi/目录下spi.c文件中提供给其他文件的函数，首先看下spi核心的初始化函数spi_init(void)。程序如下：
+
+点击(此处)折叠或打开
+
+    static int __init spi_init(void)
+    {
+        int    status;
+
+        buf = kmalloc(SPI_BUFSIZ, GFP_KERNEL);
+        if (!buf) {
+            status = -ENOMEM;
+            goto err0;
+        }
+
+        status = bus_register(&spi_bus_type);
+        if (status < 0)
+            goto err1;
+
+        status = class_register(&spi_master_class);
+        if (status < 0)
+            goto err2;
+        return 0;
+
+    err2:
+        bus_unregister(&spi_bus_type);
+    err1:
+        kfree(buf);
+        buf = NULL;
+    err0:
+        return status;
+    }
+    postcore_initcall(spi_init); 
+
+        说明：
+        1) 由postcore_initcall(spi_init);可以看出，此宏在系统初始化时是先于module_init()执行的。
+
+        2) 申请的buf空间用于在spi数据传输中。
+
+        3) 接下来是总线注册和类注册，首先看下总线注册。
+
+点击(此处)折叠或打开
+
+    struct subsys_private {
+        struct kset subsys;
+        struct kset *devices_kset;
+
+        struct kset *drivers_kset;
+        struct klist klist_devices;
+        struct klist klist_drivers;
+        struct blocking_notifier_head bus_notifier;
+        unsigned int drivers_autoprobe:1;
+        struct bus_type *bus;
+
+        struct list_head class_interfaces;
+        struct kset glue_dirs;
+        struct mutex class_mutex;
+        struct class *class;
+    };
+    struct bus_type {
+        const char        *name;
+        struct bus_attribute    *bus_attrs;
+        struct device_attribute    *dev_attrs;
+        struct driver_attribute    *drv_attrs;
+
+        int (*match)(struct device *dev, struct device_driver *drv);
+        int (*uevent)(struct device *dev, struct kobj_uevent_env *env);
+        int (*probe)(struct device *dev);
+        int (*remove)(struct device *dev);
+        void (*shutdown)(struct device *dev);
+
+        int (*suspend)(struct device *dev, pm_message_t state);
+        int (*resume)(struct device *dev);
+
+        const struct dev_pm_ops *pm;
+
+        struct subsys_private *p;
+    };
+    struct bus_type spi_bus_type = {
+        .name        = "spi",
+        .dev_attrs    = spi_dev_attrs,
+        .match        = spi_match_device,
+        .uevent        = spi_uevent,
+        .pm        = &spi_pm,
+    };
+    int bus_register(struct bus_type *bus)
+    {
+        int retval;
+        struct subsys_private *priv;
+
+        priv = kzalloc(sizeof(struct subsys_private), GFP_KERNEL);
+        if (!priv)
+            return -ENOMEM;
+
+        priv->bus = bus;
+        bus->p = priv;
+
+        BLOCKING_INIT_NOTIFIER_HEAD(&priv->bus_notifier);
+        //总线的名字”spi”,我们说过了一个kobject对应一个目录，这里为这个目录赋值名字
+        retval = kobject_set_name(&priv->subsys.kobj, "%s", bus->name);
+        if (retval)
+            goto out;
+
+        priv->subsys.kobj.kset = bus_kset;
+        priv->subsys.kobj.ktype = &bus_ktype;
+        priv->drivers_autoprobe = 1;
+        //创建devices命名的目录
+        retval = kset_register(&priv->subsys);
+        if (retval)
+            goto out;
+        //创建属性文件
+        retval = bus_create_file(bus, &bus_attr_uevent);
+        if (retval)
+            goto bus_uevent_fail;
+
+        priv->devices_kset = kset_create_and_add("devices", NULL,
+                             &priv->subsys.kobj);
+        if (!priv->devices_kset) {
+            retval = -ENOMEM;
+            goto bus_devices_fail;
+        }
+
+        priv->drivers_kset = kset_create_and_add("drivers", NULL,
+                             &priv->subsys.kobj);
+        if (!priv->drivers_kset) {
+            retval = -ENOMEM;
+            goto bus_drivers_fail;
+        }
+
+        klist_init(&priv->klist_devices, klist_devices_get, klist_devices_put);
+        klist_init(&priv->klist_drivers, NULL, NULL);
+
+        retval = add_probe_files(bus);    //添加探测属性
+        if (retval)
+            goto bus_probe_files_fail;
+
+        retval = bus_add_attrs(bus);    //添加其他属性
+        if (retval)
+            goto bus_attrs_fail;
+
+        pr_debug("bus: '%s': registered\n", bus->name);
+        return 0;
+
+    bus_attrs_fail:
+        remove_probe_files(bus);
+    bus_probe_files_fail:
+        kset_unregister(bus->p->drivers_kset);
+    bus_drivers_fail:
+        kset_unregister(bus->p->devices_kset);
+    bus_devices_fail:
+        bus_remove_file(bus, &bus_attr_uevent);
+    bus_uevent_fail:
+        kset_unregister(&bus->p->subsys);
+    out:
+        kfree(bus->p);
+        bus->p = NULL;
+        return retval;
+    } 
+
+        说明：
+
+        1)  首先不管是设备还是驱动，都是挂接在某条总线上的，也就是说我们根据总线类型的不同来区分各种设备和驱动。
+
+        2) 从总线注册函数bus_register(struct bus_type *bus)中可以发现，首先申请了一个subsys_private结构体内存。该结构体中包含了三个kset结构，分别是struct kset subsys、struct kset *devices_kset和struct kset *drivers_kset。
+
+        3) subsys是用来向上链接的。
+
+        4) 当发现一个设备或者驱动的时候，对于每一次设备或者驱动注册(设备是被插入了，驱动就是.ko模块被加载)，都得分配一个device或者device_drive结构，每一次都需要将device结构挂入drivers或devices(kset结构)链表中，这样才能通过总线找到挂接在这个总线上的所有设备和驱动。这里仅仅将设备和驱动挂接在总线上，并不能表明设备和驱动之间的关系，这样的处理仅仅表明了驱动、设备与总线的关系，它们申明了我现在挂接在这条总线上，以后操作我就通过这条总线。
+
+        5) 总线的目录名为”spi”。也就是说在/sys/bus目录下有一个spi目录，即/sys/bus/spi。内核中有spi总线驱动，bus_register(&spi_bus_type)就是用来注册总线的，该函数调用完成后，就会在/sys/bus/目录下创建spi目录。
+
+        接下来看下总线中spi_match_device()函数，此函数在(四)中的设备注册中会调用，如下：
+
+点击(此处)折叠或打开
+
+    static int spi_match_device(struct device *dev, struct device_driver *drv)
+    {
+        const struct spi_device    *spi = to_spi_device(dev);
+        const struct spi_driver    *sdrv = to_spi_driver(drv);
+
+        /* Attempt an OF style match */
+        if (of_driver_match_device(dev, drv))
+            return 1;
+
+        if (sdrv->id_table)
+            return !!spi_match_id(sdrv->id_table, spi);
+
+        return strcmp(spi->modalias, drv->name) == 0;
+    } 
+
+        说明：
+
+        1) 首先查看驱动和设备是否匹配，如果不匹配，退出。
+
+        2) 判断驱动中是否支持id数组，如果支持，查找匹配此id的spi_device。
+
+        3) 比较设备的名字的和驱动的名字是否相同。
+二、spi驱动注册
+        在《Linux spi驱动分析(四)----SPI设备驱动(W25Q32BV)》中，执行语句spi_register_driver(&w25q_driver);，从而注册spi驱动。函数如下：
+
+点击(此处)折叠或打开
+
+    struct spi_driver {
+        const struct spi_device_id *id_table;
+        int            (*probe)(struct spi_device *spi);
+        int            (*remove)(struct spi_device *spi);
+        void            (*shutdown)(struct spi_device *spi);
+        int            (*suspend)(struct spi_device *spi, pm_message_t mesg);
+        int            (*resume)(struct spi_device *spi);
+        struct device_driver    driver;
+    };
+    static struct spi_driver w25q_driver = {
+        .driver    = {
+            .name    = "spi-w25q",
+            .owner    = THIS_MODULE,
+        },
+        //.id_table    = w25q_ids,
+        .probe    = w25q_probe,
+        .remove    = __devexit_p(w25q_remove),
+    };
+    int spi_register_driver(struct spi_driver *sdrv)
+    {
+        sdrv->driver.bus = &spi_bus_type;
+        if (sdrv->probe)
+            sdrv->driver.probe = spi_drv_probe;
+        if (sdrv->remove)
+            sdrv->driver.remove = spi_drv_remove;
+        if (sdrv->shutdown)
+            sdrv->driver.shutdown = spi_drv_shutdown;
+        return driver_register(&sdrv->driver);
+    } 
+
+        说明：
+
+        1) 驱动是如何插入到/sys/bus/drivers/spi目录下的？在driver_register->driver_register->bus_add_driver函数中有个重要的语句drv->kobj.kset = &bus->drivers，这里就是将driver的kobj所属的kset挂接上总线的kset。
+
+        2) 在struct spi_driver中指明驱动的名称，这里是"spi-w25q"。
+
+        3) spi_register_driver()函数的参数为spi_driver结构。函数定义了bus_type，也就是驱动挂接的总线类型。函数接下来对结构体spi_driver中的device_driver成员赋值。
+
+        4) 驱动注册，程序如下：
+
+点击(此处)折叠或打开
+
+    struct device_driver {
+        const char        *name; //设备驱动的名字
+        struct bus_type        *bus; //设备驱动挂接的总线类型
+
+        struct module        *owner;
+        const char        *mod_name;    /* used for built-in modules */
+
+        bool suppress_bind_attrs;    /* disables bind/unbind via sysfs */
+
+        const struct of_device_id    *of_match_table;
+
+        int (*probe) (struct device *dev);
+        int (*remove) (struct device *dev);
+        void (*shutdown) (struct device *dev);
+        int (*suspend) (struct device *dev, pm_message_t state);
+        int (*resume) (struct device *dev);
+        const struct attribute_group **groups;
+
+        const struct dev_pm_ops *pm;
+
+        struct driver_private *p;
+    };
+    int driver_register(struct device_driver *drv)
+    {
+        int ret;
+        struct device_driver *other;
+
+        BUG_ON(!drv->bus->p);
+
+        if ((drv->bus->probe && drv->probe) ||
+         (drv->bus->remove && drv->remove) ||
+         (drv->bus->shutdown && drv->shutdown))
+            printk(KERN_WARNING "Driver '%s' needs updating - please use "
+                "bus_type methods\n", drv->name);
+        /* 在kobject结构组成的链表中查找是否已经存在这个驱动,前面讲过,驱动必然挂接在某个总线
+           上，返回值是device_driver结构的指针 */
+        other = driver_find(drv->name, drv->bus);
+        if (other) {
+            put_driver(other);
+            printk(KERN_ERR "Error: Driver '%s' is already registered, "
+                "aborting...\n", drv->name);
+            return -EBUSY;
+        }
+
+        ret = bus_add_driver(drv);
+        if (ret)
+            return ret;
+        ret = driver_add_groups(drv, drv->groups);
+        if (ret)
+            bus_remove_driver(drv);
+        return ret;
+    } 
+
+        说明：
+
+        1) driver_register()完成挂接驱动至总线及生成设备树的过程。
+
+        2) 首先调用driver_find()函数在spi总线上查找该驱动是否已经存在，如果存在，忙退出。
+
+        3) 如果该驱动在SPI总线上不存在，调用bus_add_driver(drv)增加该驱动。
+
+        4) 调用driver_add_groups(drv, drv->groups)函数增加驱动组。
+
+        接下来看bus_add_driver函数，程序如下：
+
+点击(此处)折叠或打开
+
+    int bus_add_driver(struct device_driver *drv)
+    {
+        struct bus_type *bus;
+        struct driver_private *priv;
+        int error = 0;
+
+        bus = bus_get(drv->bus);
+        if (!bus)
+            return -EINVAL;
+
+        pr_debug("bus: '%s': add driver %s\n", bus->name, drv->name);
+
+        priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+        if (!priv) {
+            error = -ENOMEM;
+            goto out_put_bus;
+        }
+        klist_init(&priv->klist_devices, NULL, NULL);
+        priv->driver = drv;
+        drv->p = priv;
+        priv->kobj.kset = bus->p->drivers_kset;
+        error = kobject_init_and_add(&priv->kobj, &driver_ktype, NULL,
+                     "%s", drv->name);
+        if (error)
+            goto out_unregister;
+
+        if (drv->bus->p->drivers_autoprobe) {
+            error = driver_attach(drv);     //这个函数是重点.
+            if (error)
+                goto out_unregister;
+        }
+        klist_add_tail(&priv->knode_bus, &bus->p->klist_drivers);
+        module_add_driver(drv->owner, drv);
+
+        error = driver_create_file(drv, &driver_attr_uevent);
+        if (error) {
+            printk(KERN_ERR "%s: uevent attr (%s) failed\n",
+                __func__, drv->name);
+        }
+        error = driver_add_attrs(bus, drv);
+        if (error) {
+            /* How the hell do we get out of this pickle? Give up */
+            printk(KERN_ERR "%s: driver_add_attrs(%s) failed\n",
+                __func__, drv->name);
+        }
+
+        if (!drv->suppress_bind_attrs) {
+            error = add_bind_files(drv);
+            if (error) {
+                /* Ditto */
+                printk(KERN_ERR "%s: add_bind_files(%s) failed\n",
+                    __func__, drv->name);
+            }
+        }
+
+        kobject_uevent(&priv->kobj, KOBJ_ADD);
+        return 0;
+
+    out_unregister:
+        kobject_put(&priv->kobj);
+        kfree(drv->p);
+        drv->p = NULL;
+    out_put_bus:
+        bus_put(bus);
+        return error;
+    } 
+
+        说明：
+
+        1) 首先创建struct driver_private *priv结构体内存，注意此结构体是struct device_driver的成员变量。
+
+        2) 初始化priv成员变量。
+
+        3) 如果驱动总线支持自动探测，则调用error = driver_attach(drv); 实现探测。由(二)中bus_register()函数可以看出，bus->p->drivers_autoprobe = 1，支持自动探测。
+
+        4) driver_attach(drv); 的作用是：如果驱动还未挂接在总线上，挂接它并且调用probe函数进行探测。
+
+点击(此处)折叠或打开
+
+    int driver_attach(struct device_driver *drv)
+    {
+        return bus_for_each_dev(drv->bus, NULL, drv, __driver_attach);
+    } 
+
+        这个函数会调用__driver_attach函数，如下：
+
+点击(此处)折叠或打开
+
+    static int __driver_attach(struct device *dev, void *data)
+    {
+        struct device_driver *drv = data;
+
+        /*
+         * Lock device and try to bind to it. We drop the error
+         * here and always return 0, because we need to keep trying
+         * to bind to devices and some drivers will return an error
+         * simply if it didn't support the device.
+         *
+         * driver_probe_device() will spit a warning if there
+         * is an error.
+         */
+
+        if (!driver_match_device(drv, dev))
+            return 0;
+
+        if (dev->parent)    /* Needed for USB */
+            device_lock(dev->parent);
+        device_lock(dev);
+        if (!dev->driver)
+            driver_probe_device(drv, dev);    //此函数就是我们要找的函数
+        device_unlock(dev);
+        if (dev->parent)
+            device_unlock(dev->parent);
+
+        return 0;
+    } 
+
+        driver_probe_device()函数如下：
+
+点击(此处)折叠或打开
+
+    int driver_probe_device(struct device_driver *drv, struct device *dev)
+    {
+        int ret = 0;
+
+        if (!device_is_registered(dev))
+            return -ENODEV;
+
+        pr_debug("bus: '%s': %s: matched device %s with driver %s\n",
+             drv->bus->name, __func__, dev_name(dev), drv->name);
+
+        pm_runtime_get_noresume(dev);
+        pm_runtime_barrier(dev);
+        ret = really_probe(dev, drv);
+        pm_runtime_put_sync(dev);
+
+        return ret;
+    } 
+
+          driver_probe_device函数中有一个really_probe函数,这是我们的最终目的地。
+
+点击(此处)折叠或打开
+
+    static int really_probe(struct device *dev, struct device_driver *drv)
+    {
+        int ret = 0;
+
+        atomic_inc(&probe_count);
+        pr_debug("bus: '%s': %s: probing driver %s with device %s\n",
+             drv->bus->name, __func__, drv->name, dev_name(dev));
+        WARN_ON(!list_empty(&dev->devres_head));
+
+        dev->driver = drv;
+        if (driver_sysfs_add(dev)) {
+            printk(KERN_ERR "%s: driver_sysfs_add(%s) failed\n",
+                __func__, dev_name(dev));
+            goto probe_failed;
+        }
+
+        if (dev->bus->probe) {
+            ret = dev->bus->probe(dev);
+            if (ret)
+                goto probe_failed;
+        } else if (drv->probe) {
+            ret = drv->probe(dev);
+            if (ret)
+                goto probe_failed;
+        }
+
+        driver_bound(dev);
+        ret = 1;
+        pr_debug("bus: '%s': %s: bound device %s to driver %s\n",
+             drv->bus->name, __func__, dev_name(dev), drv->name);
+        goto done;
+
+    probe_failed:
+        devres_release_all(dev);
+        driver_sysfs_remove(dev);
+        dev->driver = NULL;
+
+        if (ret != -ENODEV && ret != -ENXIO) {
+            /* driver matched but the probe failed */
+            printk(KERN_WARNING
+             "%s: probe of %s failed with error %d\n",
+             drv->name, dev_name(dev), ret);
+        }
+        /*
+         * Ignore errors returned by ->probe so that the next driver can try
+         * its luck.
+         */
+        ret = 0;
+    done:
+        atomic_dec(&probe_count);
+        wake_up(&probe_waitqueue);
+        return ret;
+    } 
+
+        说明：
+
+        1) 在if (dev->bus->probe)中，由于此处还没有定义设备，所以不执行if里面的程序。在else if (drv->probe)中，驱动里面有探测函数，所以执行ret = drv->probe(dev);。因为此处还没有定义设备，所以此处执行没有效果。
+
+        在 bus_for_each_dev函数中可以找到device结构：
+
+点击(此处)折叠或打开
+
+    int bus_for_each_dev(struct bus_type *bus, struct device *start,
+             void *data, int (*fn)(struct device *, void *))
+    {
+        struct klist_iter i;
+        struct device *dev;
+        int error = 0;
+
+        if (!bus)
+            return -EINVAL;
+
+        klist_iter_init_node(&bus->p->klist_devices, &i,
+                 (start ? &start->p->knode_bus : NULL));
+       
+        while ((dev = next_device(&i)) && !error)
+            error = fn(dev, data);
+        klist_iter_exit(&i);
+        return error;
+    } 
+
+        说明：
+
+        1) 查找每个挂接在spi总线上的设备，看他们是否有注册，并调用相应的函数也就是__driver_attach函数。实际上就是查找device结构。
+三、spi设备注册
+
+        在《Linux spi驱动分析(一)----总线驱动》中，spi_new_device()函数调用了spi_add_device(proxy)，程序如下：
+
+点击(此处)折叠或打开
+
+    struct device {
+        struct device        *parent;
+
+        struct device_private    *p;
+
+        struct kobject kobj;
+        const char        *init_name; /* initial name of the device */
+        const struct device_type *type;
+
+        struct mutex        mutex;    /* mutex to synchronize calls to
+                         * its driver.
+                         */
+
+        struct bus_type    *bus;        /* type of bus device is on */
+        struct device_driver *driver;    /* which driver has allocated this
+                         device */
+        void        *platform_data;    /* Platform specific data, device
+                         core doesn't touch it */
+        struct dev_pm_info    power;
+        struct dev_power_domain    *pwr_domain;
+
+    #ifdef CONFIG_NUMA
+        int        numa_node;    /* NUMA node this device is close to */
+    #endif
+        u64        *dma_mask;    /* dma mask (if dma'able device) */
+        u64        coherent_dma_mask;/* Like dma_mask, but for
+                         alloc_coherent mappings as
+                         not all hardware supports
+                         64 bit addresses for consistent
+                         allocations such descriptors. */
+
+        struct device_dma_parameters *dma_parms;
+
+        struct list_head    dma_pools;    /* dma pools (if dma'ble) */
+
+        struct dma_coherent_mem    *dma_mem; /* internal for coherent mem
+                         override */
+        /* arch specific additions */
+        struct dev_archdata    archdata;
+
+        struct device_node    *of_node; /* associated device tree node */
+
+        dev_t            devt;    /* dev_t, creates the sysfs "dev" */
+
+        spinlock_t        devres_lock;
+        struct list_head    devres_head;
+
+        struct klist_node    knode_class;
+        struct class        *class;
+        const struct attribute_group **groups;    /* optional groups */
+
+        void    (*release)(struct device *dev);
+    };
+    int spi_add_device(struct spi_device *spi)
+    {
+        static DEFINE_MUTEX(spi_add_lock);
+        struct device *dev = spi->master->dev.parent;
+        struct device *d;
+        int status;
+
+        /* Chipselects are numbered 0..max; validate. */
+        if (spi->chip_select >= spi->master->num_chipselect) {
+            dev_err(dev, "cs%d >= max %d\n",
+                spi->chip_select,
+                spi->master->num_chipselect);
+            return -EINVAL;
+        }
+
+        /* Set the bus ID string */
+        dev_set_name(&spi->dev, "%s.%u", dev_name(&spi->master->dev),
+                spi->chip_select);
+
+
+        /* We need to make sure there's no other device with this
+         * chipselect **BEFORE** we call setup(), else we'll trash
+         * its configuration. Lock against concurrent add() calls.
+         */
+        mutex_lock(&spi_add_lock);
+
+        d = bus_find_device_by_name(&spi_bus_type, NULL, dev_name(&spi->dev));
+        if (d != NULL) {
+            dev_err(dev, "chipselect %d already in use\n",
+                    spi->chip_select);
+            put_device(d);
+            status = -EBUSY;
+            goto done;
+        }
+
+        /* Drivers may modify this initial i/o setup, but will
+         * normally rely on the device being setup. Devices
+         * using SPI_CS_HIGH can't coexist well otherwise...
+         */
+        status = spi_setup(spi);
+        if (status < 0) {
+            dev_err(dev, "can't setup %s, status %d\n",
+                    dev_name(&spi->dev), status);
+            goto done;
+        }
+
+        /* Device may be bound to an active driver when this returns */
+        status = device_add(&spi->dev);
+        if (status < 0)
+            dev_err(dev, "can't add %s, status %d\n",
+                    dev_name(&spi->dev), status);
+        else
+            dev_dbg(dev, "registered child %s\n", dev_name(&spi->dev));
+
+    done:
+        mutex_unlock(&spi_add_lock);
+        return status;
+    }
+
+        说明：
+
+        1) 在设备device的定义中，定义了这个设备挂接的总线和驱动。
+
+        2) spi_add_device()函数首先判断是否超出最大设备数，如果超过，直接退出。
+
+        3) 设置设备名称，此名称即是/sys/bus/spi/devices/下的一个目录。
+
+        4) 在spi总线上寻找此设备，如果找到，退出。
+
+        5) 调用spi_setup(spi)函数。
+
+        6) 调用device_add(&spi->dev)函数对设备进行初始化和注册。程序如下：
+
+点击(此处)折叠或打开
+
+    int device_add(struct device *dev)
+    {
+        struct device *parent = NULL;
+        struct class_interface *class_intf;
+        int error = -EINVAL;
+
+        dev = get_device(dev);
+        if (!dev)
+            goto done;
+
+        if (!dev->p) {
+            error = device_private_init(dev);
+            if (error)
+                goto done;
+        }
+
+        /*
+         * for statically allocated devices, which should all be converted
+         * some day, we need to initialize the name. We prevent reading back
+         * the name, and force the use of dev_name()
+         */
+        if (dev->init_name) {
+            dev_set_name(dev, "%s", dev->init_name);
+            dev->init_name = NULL;
+        }
+
+        if (!dev_name(dev)) {
+            error = -EINVAL;
+            goto name_error;
+        }
+
+        pr_debug("device: '%s': %s\n", dev_name(dev), __func__);
+
+        parent = get_device(dev->parent);
+        setup_parent(dev, parent);
+
+        /* use parent numa_node */
+        if (parent)
+            set_dev_node(dev, dev_to_node(parent));
+
+        /* first, register with generic layer. */
+        /* we require the name to be set before, and pass NULL */
+        error = kobject_add(&dev->kobj, dev->kobj.parent, NULL);
+        if (error)
+            goto Error;
+
+        /* notify platform of device entry */
+        if (platform_notify)
+            platform_notify(dev);
+
+        error = device_create_file(dev, &uevent_attr);
+        if (error)
+            goto attrError;
+
+        if (MAJOR(dev->devt)) {
+            error = device_create_file(dev, &devt_attr);
+            if (error)
+                goto ueventattrError;
+
+            error = device_create_sys_dev_entry(dev);
+            if (error)
+                goto devtattrError;
+
+            devtmpfs_create_node(dev);
+        }
+
+        error = device_add_class_symlinks(dev);
+        if (error)
+            goto SymlinkError;
+        error = device_add_attrs(dev);
+        if (error)
+            goto AttrsError;
+        error = bus_add_device(dev);
+        if (error)
+            goto BusError;
+        error = dpm_sysfs_add(dev);
+        if (error)
+            goto DPMError;
+        device_pm_add(dev);
+
+        /* Notify clients of device addition. This call must come
+         * after dpm_sysf_add() and before kobject_uevent().
+         */
+        if (dev->bus)
+            blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
+                         BUS_NOTIFY_ADD_DEVICE, dev);
+
+        kobject_uevent(&dev->kobj, KOBJ_ADD);
+        bus_probe_device(dev);
+        if (parent)
+            klist_add_tail(&dev->p->knode_parent,
+                 &parent->p->klist_children);
+
+        if (dev->class) {
+            mutex_lock(&dev->class->p->class_mutex);
+            /* tie the class to the device */
+            klist_add_tail(&dev->knode_class,
+                 &dev->class->p->klist_devices);
+
+            /* notify any interfaces that the device is here */
+            list_for_each_entry(class_intf,
+                     &dev->class->p->class_interfaces, node)
+                if (class_intf->add_dev)
+                    class_intf->add_dev(dev, class_intf);
+            mutex_unlock(&dev->class->p->class_mutex);
+        }
+    done:
+        put_device(dev);
+        return error;
+     DPMError:
+        bus_remove_device(dev);
+     BusError:
+        device_remove_attrs(dev);
+     AttrsError:
+        device_remove_class_symlinks(dev);
+     SymlinkError:
+        if (MAJOR(dev->devt))
+            devtmpfs_delete_node(dev);
+        if (MAJOR(dev->devt))
+            device_remove_sys_dev_entry(dev);
+     devtattrError:
+        if (MAJOR(dev->devt))
+            device_remove_file(dev, &devt_attr);
+     ueventattrError:
+        device_remove_file(dev, &uevent_attr);
+     attrError:
+        kobject_uevent(&dev->kobj, KOBJ_REMOVE);
+        kobject_del(&dev->kobj);
+     Error:
+        cleanup_device_parent(dev);
+        if (parent)
+            put_device(parent);
+    name_error:
+        kfree(dev->p);
+        dev->p = NULL;
+        goto done;
+    } 
+
+          说明：
+
+          1) 首先获取设备dev，对dev的成员进行初始化。
+
+          2) kobject_add()完成目录的创建。
+
+          3) 创建文件。
+
+          4) bus_probe_device(dev);，总线探测设备，程序如下：
+
+点击(此处)折叠或打开
+
+    void bus_probe_device(struct device *dev)
+    {
+        struct bus_type *bus = dev->bus;
+        int ret;
+
+        if (bus && bus->p->drivers_autoprobe) {
+            ret = device_attach(dev);
+            WARN_ON(ret < 0);
+        }
+    }
+    int device_attach(struct device *dev)
+    {
+        int ret = 0;
+
+        device_lock(dev);
+        if (dev->driver) {
+            if (klist_node_attached(&dev->p->knode_driver)) {
+                ret = 1;
+                goto out_unlock;
+            }
+            ret = device_bind_driver(dev);
+            if (ret == 0)
+                ret = 1;
+            else {
+                dev->driver = NULL;
+                ret = 0;
+            }
+        } else {
+            pm_runtime_get_noresume(dev);
+            ret = bus_for_each_drv(dev->bus, NULL, dev, __device_attach);
+            pm_runtime_put_sync(dev);
+        }
+    out_unlock:
+        device_unlock(dev);
+        return ret;
+    } 
+
+        说明：
+        1) 由(二)中的总线注册函数可知，bus->p->drivers_autoprobe = 1。
+
+        2) 调用device_attach()函数加载设备。
+
+        3) 由于程序还没有对dev->driver进行赋值，所以此处程序走的是else。
+
+        4) bus_for_each_drv()函数调用__device_attach()函数，程序如下：
+
+点击(此处)折叠或打开
+
+    int bus_for_each_drv(struct bus_type *bus, struct device_driver *start,
+             void *data, int (*fn)(struct device_driver *, void *))
+    {
+        struct klist_iter i;
+        struct device_driver *drv;
+        int error = 0;
+
+        if (!bus)
+            return -EINVAL;
+
+        klist_iter_init_node(&bus->p->klist_drivers, &i,
+                 start ? &start->p->knode_bus : NULL);
+        while ((drv = next_driver(&i)) && !error)
+            error = fn(drv, data);
+        klist_iter_exit(&i);
+        return error;
+    }
+    static inline int driver_match_device(struct device_driver *drv,
+                     struct device *dev)
+    {
+        return drv->bus->match ? drv->bus->match(dev, drv) : 1;
+    }
+    static int __device_attach(struct device_driver *drv, void *data)
+    {
+        struct device *dev = data;
+
+        if (!driver_match_device(drv, dev))
+            return 0;
+
+        return driver_probe_device(drv, dev);
+    } 
+
+        说明：          
+        1) __device_attach()函数使用了两个参数，一个参数为dev，另外一个就是bus_for_each_drv()函数提供的。
+
+        2) __device_attach()函数首先使用函数driver_match_device(drv, dev)查看驱动是否匹配设备，如果不匹配，退出。driver_match_device(drv, dev)中，判断是否有drv->bus->match，从(二)总线注册中知道，总线中有match，所以调用(二)中的spi_match_device()函数。
+
+         3) driver_probe_device()函数完成驱动探测，程序如下：
+
+点击(此处)折叠或打开
+
+    int driver_probe_device(struct device_driver *drv, struct device *dev)
+    {
+        int ret = 0;
+
+        if (!device_is_registered(dev))
+            return -ENODEV;
+
+        pr_debug("bus: '%s': %s: matched device %s with driver %s\n",
+             drv->bus->name, __func__, dev_name(dev), drv->name);
+
+        pm_runtime_get_noresume(dev);
+        pm_runtime_barrier(dev);
+        ret = really_probe(dev, drv);
+        pm_runtime_put_sync(dev);
+
+        return ret;
+    }
+    static int really_probe(struct device *dev, struct device_driver *drv)
+    {
+        int ret = 0;
+
+        atomic_inc(&probe_count);
+        pr_debug("bus: '%s': %s: probing driver %s with device %s\n",
+             drv->bus->name, __func__, drv->name, dev_name(dev));
+        WARN_ON(!list_empty(&dev->devres_head));
+
+        dev->driver = drv;
+        if (driver_sysfs_add(dev)) {
+            printk(KERN_ERR "%s: driver_sysfs_add(%s) failed\n",
+                __func__, dev_name(dev));
+            goto probe_failed;
+        }
+
+        if (dev->bus->probe) {
+            ret = dev->bus->probe(dev);
+            if (ret)
+                goto probe_failed;
+        } else if (drv->probe) {
+            ret = drv->probe(dev);
+            if (ret)
+                goto probe_failed;
+        }
+
+        driver_bound(dev);
+        ret = 1;
+        pr_debug("bus: '%s': %s: bound device %s to driver %s\n",
+             drv->bus->name, __func__, dev_name(dev), drv->name);
+        goto done;
+
+    probe_failed:
+        devres_release_all(dev);
+        driver_sysfs_remove(dev);
+        dev->driver = NULL;
+
+        if (ret != -ENODEV && ret != -ENXIO) {
+            /* driver matched but the probe failed */
+            printk(KERN_WARNING
+             "%s: probe of %s failed with error %d\n",
+             drv->name, dev_name(dev), ret);
+        }
+        /*
+         * Ignore errors returned by ->probe so that the next driver can try
+         * its luck.
+         */
+        ret = 0;
+    done:
+        atomic_dec(&probe_count);
+        wake_up(&probe_waitqueue);
+        return ret;
+    } 
+
+        说明：
+
+        1) driver_probe_device()函数调用really_probe()函数。
+
+        2) 在really_probe()函数中，由于设备的总线中没有探测函数，所以不执行if (dev->bus->probe)。
+
+        3) spi驱动中有探测函数，所以执行else if (drv->probe)里面的程序，即ret = drv->probe(dev);，从(三)中的int spi_register_driver(struct spi_driver *sdrv)函数可以看到，驱动的探测函数为spi_drv_probe()，程序如下：
+
+点击(此处)折叠或打开
+
+    static int spi_drv_probe(struct device *dev)
+    {
+        const struct spi_driver        *sdrv = to_spi_driver(dev->driver);
+
+        return sdrv->probe(to_spi_device(dev));
+    } 
+
+        说明：
+
+        1) 首先获取spi_driver结构体。
+
+        2) 调用spi_driver结构体中的探测函数，即为(三)中的w25q_probe()函数。
+        在really_probe()函数中，调用driver_bound(dev);函数实现设备与驱动的绑定，程序如下：
+
+点击(此处)折叠或打开
+
+    static void driver_bound(struct device *dev)
+    {
+        if (klist_node_attached(&dev->p->knode_driver)) {
+            printk(KERN_WARNING "%s: device %s already bound\n",
+                __func__, kobject_name(&dev->kobj));
+            return;
+        }
+
+        pr_debug("driver: '%s': %s: bound to device '%s'\n", dev_name(dev),
+             __func__, dev->driver->name);
+
+        klist_add_tail(&dev->p->knode_driver, &dev->driver->p->klist_devices);
+
+        if (dev->bus)
+            blocking_notifier_call_chain(&dev->bus->p->bus_notifier,
+                         BUS_NOTIFY_BOUND_DRIVER, dev);
+    } 
+
+        说明：
+
+        1) 使用klist_add_tail()将设备与驱动链接在一起。
+
+四、总结
+
+        在device和device_drive结构中，device中存在一个struct device_driver *driver，而在device_drive中并没有同样的包含device结构。对于一个设备来说，只能绑定一个驱动；而对于一个驱动来说，可以对应多个设备。 也就是说这里device中的driver指针将会指向其绑定的驱动。回到probe探测函数，对一个设备驱动进行注册的过程中，会在其相应的总线（也就是其挂接的总线）上发出一个探测，这个探测会搜寻所有挂接在这个总线上的尚未被绑定的设备（也就是driver指针为NULL），然后将driver指针指向这个驱动的结构，同时将这个设备的device结构挂接在device_driver结构中的klist链表中。 当一个设备被注册时，它也会去寻找挂接在同一条总线上的驱动，并将自己与这个驱动联系起来。
+五、spi传输函数
+
+        spi核心提供了数据传输函数，如下：
+
+点击(此处)折叠或打开
+
+    static inline void spi_message_init(struct spi_message *m)
+    {
+        memset(m, 0, sizeof *m);
+        INIT_LIST_HEAD(&m->transfers);
+    }
+    static inline void
+    spi_message_add_tail(struct spi_transfer *t, struct spi_message *m)
+    {
+        list_add_tail(&t->transfer_list, &m->transfers);
+    }
+    static inline int
+    spi_write(struct spi_device *spi, const void *buf, size_t len)
+    {
+        struct spi_transfer    t = {
+                .tx_buf        = buf,
+                .len        = len,
+            };
+        struct spi_message    m;
+
+        spi_message_init(&m);
+        spi_message_add_tail(&t, &m);
+        return spi_sync(spi, &m);
+    }
+    static inline int
+    spi_read(struct spi_device *spi, void *buf, size_t len)
+    {
+        struct spi_transfer    t = {
+                .rx_buf        = buf,
+                .len        = len,
+            };
+        struct spi_message    m;
+
+        spi_message_init(&m);
+        spi_message_add_tail(&t, &m);
+        return spi_sync(spi, &m);
+    }
+    static inline ssize_t spi_w8r8(struct spi_device *spi, u8 cmd)
+    {
+        ssize_t            status;
+        u8            result;
+
+        status = spi_write_then_read(spi, &cmd, 1, &result, 1);
+
+        /* return negative errno or unsigned value */
+        return (status < 0) ? status : result;
+    }
+    static inline ssize_t spi_w8r16(struct spi_device *spi, u8 cmd)
+    {
+        ssize_t            status;
+        u16            result;
+
+        status = spi_write_then_read(spi, &cmd, 1, (u8 *) &result, 2);
+
+        /* return negative errno or unsigned value */
+        return (status < 0) ? status : result;
+    } 
+
+        说明：
+
+        1) 传输开始时，首先初始化spi_message，然后将传输的spi_transfer链入spi_message中。
+        2) spi_message中，有一个transfers队列，spi_transfer结构体通过这个队列挂到spi_message中。一个spi_message代表一次传输会话，spi_transfer代表一次单独的IO操作。比如，有些spi设备需要先读后写，那么这个读写过程就是一次spi会话，里面包括两个transfer，一个定义写操作的参数，另一个定义读操作的参数。
+
+        3) 最后都是调用spi_sync()函数实现传输的，如下：
+
+点击(此处)折叠或打开
+
+    int spi_sync(struct spi_device *spi, struct spi_message *message)
+    {
+        return __spi_sync(spi, message, 0);
+    }
+    static int __spi_sync(struct spi_device *spi, struct spi_message *message,
+             int bus_locked)
+    {
+        DECLARE_COMPLETION_ONSTACK(done);
+        int status;
+        struct spi_master *master = spi->master;
+
+        message->complete = spi_complete;
+        message->context = &done;
+
+        if (!bus_locked)
+            mutex_lock(&master->bus_lock_mutex);
+
+        status = spi_async_locked(spi, message);
+
+        if (!bus_locked)
+            mutex_unlock(&master->bus_lock_mutex);
+
+        if (status == 0) {
+            wait_for_completion(&done);
+            status = message->status;
+        }
+        message->context = NULL;
+        return status;
+    }
+    int spi_async_locked(struct spi_device *spi, struct spi_message *message)
+    {
+        struct spi_master *master = spi->master;
+        int ret;
+        unsigned long flags;
+
+        spin_lock_irqsave(&master->bus_lock_spinlock, flags);
+
+        ret = __spi_async(spi, message);
+
+        spin_unlock_irqrestore(&master->bus_lock_spinlock, flags);
+
+        return ret;
+
+    }
+    static int __spi_async(struct spi_device *spi, struct spi_message *message)
+    {
+        struct spi_master *master = spi->master;
+
+        /* Half-duplex links include original MicroWire, and ones with
+         * only one data pin like SPI_3WIRE (switches direction) or where
+         * either MOSI or MISO is missing. They can also be caused by
+         * software limitations.
+         */
+        if ((master->flags & SPI_MASTER_HALF_DUPLEX)
+                || (spi->mode & SPI_3WIRE)) {
+            struct spi_transfer *xfer;
+            unsigned flags = master->flags;
+
+            list_for_each_entry(xfer, &message->transfers, transfer_list) {
+                if (xfer->rx_buf && xfer->tx_buf)
+                    return -EINVAL;
+                if ((flags & SPI_MASTER_NO_TX) && xfer->tx_buf)
+                    return -EINVAL;
+                if ((flags & SPI_MASTER_NO_RX) && xfer->rx_buf)
+                    return -EINVAL;
+            }
+        }
+
+        message->spi = spi;
+        message->status = -EINPROGRESS;
+        return master->transfer(spi, message);
+    } 
+
+        说明：
+
+        1) 由上面的函数调用轨迹看，最后就是调用master的transfer函数实现传输的。 

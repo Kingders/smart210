@@ -1,0 +1,1 @@
+cmd_/home/kingders/smart210/driver/bus/bus.ko := arm-linux-ld -EL -r  -T /home/kingders/smart210/kernel/kernel2/linux-3.10.102/scripts/module-common.lds --build-id  -o /home/kingders/smart210/driver/bus/bus.ko /home/kingders/smart210/driver/bus/bus.o /home/kingders/smart210/driver/bus/bus.mod.o

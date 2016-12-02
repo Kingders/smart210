@@ -1,0 +1,600 @@
+/*************************** 补充 **************************/
+发现了不同子系统的设备加载到linux的方式以及函数真的包罗万有,感觉完全不同于字符设备和块设备的记载方式
+也很难找到与 通过自定义总线或平台总线的方式的加载 
+
+但又听说,这些子系统都是通过 平台总线设备来间接注册挂载到linux上的
+
+
+/*************************** 调试指令 **************************/
+
+	7,成功insmod sampleblkdev.ko 的现象: (root状态下才能加载)
+		dmesg:除了可能的module verification failed,没有其他错误信息,特别是没有cpu堆栈错误信息dump_stack
+		      (demesg也可以用于检查printk输出)
+		lsmod:顶部看到 sampleblkdev 模块,并且使用者为0,(之前memcpy错误时,使用者为2,rmmod模块时会出错)
+		cat /proc/devices: 出现 [主设备号] sampleblock
+		ls /dev: 出现samp_blk 逻辑设备文件
+	  成功rmmod sampleblkdev.ko
+		lsmod cat ls 里出现的 都消失,dmesg也没有其他错误信息
+
+/*************************** linux 加载模块的相关知识 **************************/
+
+很多时候:文件里都看不到 module_init ,其实是使用了其他方式,最终还是绕个圈回到module_init
+只是其他方式附加了其他信息,安排了模块挂入linux的先后顺序,
+
+
+#define module_spi_driver(__spi_driver) \
+	module_driver(__spi_driver, spi_register_driver, \
+			spi_unregister_driver)
+
+
+#define module_platform_driver(__platform_driver) \
+	module_driver(__platform_driver, platform_driver_register, \
+			platform_driver_unregister)
+	
+			
+#define module_driver(__driver, __register, __unregister, ...) \
+static int __init __driver##_init(void) \
+{ \
+	return __register(&(__driver) , ##__VA_ARGS__); \
+} \
+module_init(__driver##_init); \
+static void __exit __driver##_exit(void) \
+{ \
+	__unregister(&(__driver) , ##__VA_ARGS__); \
+} \
+module_exit(__driver##_exit);
+
+
+/* Don't use these in loadable modules, but some people do... */
+#define early_initcall(fn)		module_init(fn)
+#define core_initcall(fn)		module_init(fn)
+#define postcore_initcall(fn)		module_init(fn)
+#define arch_initcall(fn)		module_init(fn)
+#define subsys_initcall(fn)		module_init(fn)
+#define fs_initcall(fn)			module_init(fn)
+#define device_initcall(fn)		module_init(fn)
+#define late_initcall(fn)		module_init(fn)
+#define security_initcall(fn)		module_init(fn)
+
+
+
+
+/* Each module must use one module_init(). */
+#define module_init(initfn)					\
+	static inline initcall_t __inittest(void)		\
+	{ return initfn; }					\
+	int init_module(void) __attribute__((alias(#initfn)));
+
+/* This is only required if you want to be unloadable. */
+#define module_exit(exitfn)					\
+	static inline exitcall_t __exittest(void)		\
+	{ return exitfn; }					\
+	void cleanup_module(void) __attribute__((alias(#exitfn)));
+
+
+有时候,寻找不到 总线设备中注册 设备信息的 device_register,可以寻找他封装了的内容!!
+drivers\base\core.c
+int device_register(struct device *dev)
+{
+	device_initialize(dev);
+	return device_add(dev);
+}
+
+
+
+
+
+/*************************** 基本设备驱动 **************************/
+字符设备,块设备都是基本的设备驱动,linux设备驱动的基本概念是;
+为一类设备申请一个主设备号,
+分配一个次设备号,号注册一个设备及其操作集合,到主设备号里,
+最后,根据情况创建逻辑设备文件来映射这个挂载好的驱动
+
+linux模块 和 linux设备驱动 是两回事,linux模块可以完成注册挂载多个设备驱动
+
+设备 和 设备驱动 对于 linux 的含义,日后慢慢理清
+
+此前, 字符设备驱动,快设备驱动, 杂项设备驱动 已经在 sorftware 里讨论过
+杂项设备在 按钮中断 里讨论过
+
+
+/*************************** 总线设备 平台总线设备	 **************************/
+
+注意:总线设备,概念认识更新了,所以批判翻阅以前做过的笔记,主要是总线设备,以及总线设备里谈及的 总线 设备 驱动的 概念
+总线 指这个总线设备创建的一个总线节点信息
+设备 局限在总线设备里的一个概念,不同与挂载在linux上的设备,在这里 指的是 一个迎合某个总线节点 的 设备信息
+驱动 局限在总线设备里的一个概念,不同与挂载在linux上的设备,在这里 指的是 一个迎合某个总线节点 的 驱动信息
+
+总线设备 是一类中介设备,目的用于更灵活注册挂载其他具体设备到linux
+总线设备架构上是字符设备,但是具体功能说,不是典型的字符设备,
+
+重申,注册和挂载设备到linux,不等同与安装linux内核模块, 注册和挂载设备的实现关键是执行了相关注册挂载函数
+而之前的学习都是: 在linux模块初始化函数里调用了这些函数完成 注册和挂载设备到linux 的事情.
+而今天的讨论的是,先注册注册和挂载总线设备到linux,然后这个中介设备的工作是 控制一部分设备注册和挂载到linux
+
+然后 总线设备里 又有三个重要的概念: 总线 设备信息,驱动信息!!(这三个概念只局限于一个总线设备而言,概念有别于 注册挂载到linux上的设备驱动)
+	总线:一个描述结构,描述一条自定义的虚拟的总线节点
+	设备信息:一个描述结构,描述一个设备的信息结构(仅仅是设备的描述信息)
+	驱动信息:一个描述结构,描述一个驱动的信息结构(包含 这个设备的操作集,以及 注册挂载设备到linux上 的函数)
+
+一般工作原理:
+	总线设备会创建一个自己的总线节点MM,
+	用户持有一个设备A的驱动的linux模块,但是,加载模块,并没有直接 注册挂载设备到linux上 因为未知,机器上是否已经`接上相关硬件,
+	取而代之,这个linux模块,提取相关信息,组成一个面向总线节点MM的 驱动信息 的描述结构,并挂入总线节点MM
+	当一个设备接入机器后,用户也加载一个linux模块,这个模块的工作是,把一个面向总线节点MM的 设备信息 的描述结构 挂入总线节点MM
+	总线一旦检测到有东西挂入后,便匹配现有的 设备信息 和 驱动信息 
+	发现吻合,就表示两者都就位了,于是就从那个含有驱动的linux模块里执行probe 程序,
+	执行相关 注册和挂载设备到linux上 的函数, 完成设备在linux上的注册和挂载工作
+
+例子见bus: (把按键设备以一个崭新的方式 注册挂载到linux上)
+	bus.c: 注册挂载一个bus设备到linux上 创建一条key_bus_type总线
+	device.c 注册一个key设备信息到 key_bus_type总线
+	driver.c 注册一个key驱动信息到 key_bus_type总线
+
+
+////////////////////////平台总线设备 platform_bus
+
+对于平台总线的认识,以前的笔记都不可靠,以今天的新认识为准
+
+然而,自己建立一个总线设备,不一定太有用,linux提供一个默认运行的通用的总线设备,称为平台总线设备,
+使用这个通用总线设设备,甚至可以取代各种各样的局限的自定义的总线设备完成工作.
+
+首先,平台总线设备在linux启动时便已经注册并挂载好,
+用户只需要往里面挂入 设备信息 和 驱动信息, 让其自行匹配,成功后执行相关probe
+
+例子见 bus: platform
+	key_dev.c 给平台总线设备挂入 设备信息, 平台设备触发匹配函数
+	key_drv.c 给平台总线设备挂入 驱动信息, 平台设备触发匹配函数 匹配成功,执行key_drv.ko里的probe	
+
+
+/*************************** tty 以及 串口设备驱动 **************************/
+先讨论 串口终端,控制终端console,还有虚拟终端tty的关系:
+
+	内核 printk 函数输出到 ----> console	
+					^
+				 (关联)	|		|--->tty1<---用户进程!
+					--->串口终端	|	
+						^	|--->tty2<---用户进程2
+						|	|
+						--------|--->tty3<---用户进程!
+						(关联)	|....						
+
+内核进程 与 用户进程运行在内核态 是不一样的
+用户进程输出给虚拟终端的信息,最终要传到实际的硬件设备上,如串口终端,如屏幕
+控制终端是 内核信息输出到的特殊虚拟终端, 所以控制终端可以像虚拟终端一样,关联到实体设备,从而显示信息
+当前使用的终端永远是tty0,如果当前使用的虚拟终端是tty3,那么同时当前使用的虚拟终端也是tty0
+
+控制终端 和 虚拟终端可以同时关联到 同一个硬件设备上(如串口终端):
+	那么这时,用户消息可以打印到这串口设备上,内核printk消息也可以打印到这个串口设备上
+	例如我的开发板,因为comandline有 console=ttySAC0,就是把控制终端也关联到串口上去
+
+
+
+tty系统与串口的关系:
+
+			<----------tty系统层----------->
+用户进程 -> 系统调用 -> { tty核心 -> 线路规程 -> tty驱动 } -> 串口驱动
+
+追溯用户进程printf一段消息,分析(在s3c24xx_serial_start_tx里加入 dump_strack()函数追溯):
+
+ <--------串口终端--------->     <---------tty驱动----------->     <---线路规程--->
+ { s3c24xx_serial_start_tx } <-- { uart_start <-- uart_write } <-- { n_tty_write } <--
+
+ <-------------tty核心--------------->     <-----------------系统调用-------------------->
+ { tty_write <-- redircted_tty_write } <-- { vfs_write <-- sys_write <-- ret_fast_syscall} <--用户进程
+
+
+上面可以知道: 
+	s3c24xx_serial_start_tx()才是串口驱动操作集ops中的成员!!
+	uart_start 和 uart_write 都是tty驱动操作集ops中的成员!!		
+
+所以我们所得串口驱动是最后一层的内容,是tty驱动层后一层的内容!!
+
+串口驱动:
+重要的描述结构:
+	uart_driver, uart_state, uart_port uart_ops
+
+smart210 串口驱动:包括文件:samsung.c s5pv210.c
+	samsung.c:
+		 module_init(s3c24xx_serial_modinit)
+		主要工作: uart_register_driver()	//申请串口设备这一类设备主设备号,并拟定串口设备的框架	
+	s5pv210.c:
+		module_init(s5p_serial_init)
+		主要工作:s3c24xx_serial_init()		//为每一个串口分配次设备号,然后初始化注册挂载每一个串口及其操作集到主设备号
+							//但没有自动创建逻辑设备文件并映射!!
+				platfrom_driver_register()	//使用平台设备,方便获取硬件资源进行串口的注册
+
+
+/*************************** I2c **************************/
+
+linux I2C子系统组成;
+
+							用户态程序-驱动补充
+								|
+	 访问从设备设备驱动 (1)				访问从设备通用驱动 (2)	(linux已提供)
+		|_______________________________________________|
+					|
+				    I2C核心层
+					|
+				  I2C控制器驱动 (3)
+							
+上述组成中,(1),(2)同于 访问从设备的驱动方案,用户可以选择其中一方案
+所以linux要同时注册挂载有(1),(2)其中之一,和(3) 共两个驱动,i2c才能正常工作
+
+i2ccore:给linnux挂载了一 i2c总线设备, 专门管理i2c从设备驱动和设备信息的,
+
+linux i2c系统的初始化流程:
+
+1, i2c_core 先初始化, 注册和挂载 i2c总线设备 到linux上
+2, 加载各种linux模块,大部分的与驱动相关的模块初始化工作都是把自己的 驱动信息 加载到各个已经工作的 总线设备上
+	i2c各路控制器的驱动信息到 平台总线设备上,而各种从设备信息加载到各种总线设备上
+3, 开始 板级初始化,比如来到match_mini210.c,
+	先注册 从设备信息到 i2c_设备链表 里 ,
+	i2c_register_board_info(0, mini2440_Ai2c_devs,ARRAY_SIZE(mini2440_Ai2c_devs));
+	i2c_register_board_info(1, mini2440_Bi2c_devs,ARRAY_SIZE(mini2440_Bi2c_devs));
+	//把mini2440_Ai2c_devs数组里的i2c从设备关联i2c控制器0标号,得到的新数据信息 最终挂入__i2c_board_list 链表
+	//把mini2440_Bi2c_devs数组里的i2c从设备关联i2c控制器1标号,得到的新数据信息 最终挂入__i2c_board_list 链表
+4, 给 平台总线设备 挂入平台设备信息,监测到设备信息的加入就会自动匹配,成功匹配就会 注册挂载设备到linux上
+	mini2440_init()->platform_add_devices(mini2440_devices, ARRAY_SIZE(mini2440_devices));//平台总线设备 挂入平台设备信息
+	i2c控制器设备 匹配成功,执行 s3c24xx_i2c_probe->
+	i2c_add_numbered_adapter()->i2c_register_adapter->
+	i2c_scan_static_board_info()->i2c_new_device()->device_registeer(&client->dev)
+	//其中会遍历__i2c_board_list 链表 内容,把与这个 i2c控制器相关的从设备项取出生成i2c_client数据,
+	//然后把从设备设备信息挂入 i2c总线设备,
+5,  i2c总线设备收到设备信息后,就开始匹配驱动信息,匹配到,会跳到 i2c总线设备的probe,(注意,并不会直接跳到设备上的probe)
+	然后再从中跳到跳到设备上的外围probe,然后执行具体的初始化,注册挂载设备到linux上.
+	补充:匹配好会优先跳到总线设备的probe,假如一个总线设备没有自定义自己的probe,就会跳到 具体设备的内围probe
+	     这些因为匹配成功而跳到的probe的特点是,传递的参数只用 struct device *dev
+	     假如,总线设备有自定义probe,匹配后肯定跳到这,在自定义probe里有跳到 具体设备的外围probe
+	     这个 总线设备的probe的参数一定只能是struct device *dev 而具体设备的外围probe 的参数可以自定义!!!!
+	原因在于 具体设备的probe其实有两个!!
+		具体设备的内围probe 是 struct device_driver 里的 probe, 参数只能是 struct device *dev,
+		具体设备的外围probe 是定义线设备自身的probe,参数自定义
+		以下例子一目连然:
+		struct i2c_driver {
+			...
+			struct device_driver driver;
+			int (*probe) (struct i2c_client *, const struct 12c_device_id *);//具体设备的外围probe
+			.....
+		}
+		struct device_driver {
+			...
+			int (*probe) (struct device *dev);//具体设备的内围probe
+			.....
+		}
+
+
+
+
+
+linux上i2c的运行流程:
+访问从设备设备驱动 把访问从设备的内容,构建成一个个事件 和 信息 然后传递给核心层,
+然后 核心层 递给I2C控制器驱动,
+I2C控制器驱动 拆分信息成字节流,在控制I2C控制器把字节流差传递到从设备,或是 从从设备接受数据
+
+关于I2C控制器驱动:
+struct I2C_adaptor {		//I2C控制器描述结构
+	...
+	struct algorithm	//算法函数结构
+	...}
+
+struct algorithm {		//算法函数结构,包含控制硬件收发数据,及其他操作的函数指针结构
+	'''
+	*master_xfer		//控制硬件收发数据 的函数指针
+	..}
+参考例子:i2c-s3c2410.c
+I2C_adap_s3c_init()	module_init I2C控制器初始化函数
+	都是往linux里,	/I2C_add_numbered_adaptor() --I2C控制器集成在mcu里
+	注册挂载设备	\I2C_add_adaptor() -I2C控制器并非集成在mcu里
+I2C控制器的一个发送数据流程:
+	algorithm -> s3c24xx_i2c_xfer -> s3c24xx_i2c_doxfer -> s3c24xx_i2c_message_start(发送的第一个字节)
+	得到ack后触发中断,执行中断处理函数 s3c24xx_I2C_irq -> I2S_s3c_irq_nextbyte (发送下一个字节)
+	得到ack后触发下一个中断...重复...
+i2c控制器驱动注册到linux过程,
+	i2c控制器驱动信息挂到平台总线设备上!!! platform_driver_register(&s3c24xx_i2c_driver); i2c-s3c2410.c
+	i2c控制器设备信息挂到平台总线设备上!!! platform_add_devices(mini210_devices, ARRAY_SIZE(mini210_devices));mach-mini210.c
+						即for(){platform_device_register(xx[i])}
+	platform_device s3c_device_i2c0:记录i2c0控制器设备的硬件资源信息
+	platform_driver s3c24xx_i2c_driver 记录着i2c控制器的通用实现办法就是驱动
+	match后,驱动取出具体是哪一个设备的硬件信息,执行初始化probe,挂载到linux
+
+	自动platform_match匹配然后驱动注册到linux上!!
+	platform_match有三个途径!!!,一个是an OF style match,一个是match table_id,上述都失败后,比较魔名字!!! 
+	这里主要是match table_id 
+	platform_device s3c_device_i2c1
+
+关于,platform_match成功后执行的probe初始化:
+
+
+
+
+
+
+
+
+关于访问从设备通用驱动 (2):
+参考例子 I2C-dev.c (访问从设备通用驱动)
+通用驱动,不需要用户自己写,linux自身提供,但是用户要自己写一个用户态程序来构建内容,并执行命令
+驱动的工作是提供了一套信息和事件的框架,使用这驱动,还要自己用户态程序来构建信息和事件的内容,然后通过调用驱动的ioctl来执行命令
+例如,(用户态程序的内容)
+	往设备地址A写入数据,这是一个事件,只需要构建一条写入信息(message)即可
+	从设备地址A读出数据,这是一个事件,需要一条写入信息(写入地址),和一条读取信息, 共两条message构成 
+	然后打开 访问从设备通用驱动 的逻辑设备文件,执行ioctl,发出执行事件 或 信息message 的命令
+补充1:class_create()自动创造逻辑设备文件并映射
+补充2:指针与数组变量使用新方法:
+	char *hkk;
+	hkk = (char *) malloc(4);
+	hkk[0] = 'a';
+	hkk[1] = 'b';
+	...
+
+
+
+
+关于访问从设备通用驱动 (1):
+参考AT24C04.c (I2C eeprom 驱动)
+注册挂载设备到linux 的途径也不一样,很诡异,不是加载linux模块来实现,也不是通过平台总线来匹配完成
+而是通过 struct platform_data,
+	struct 12c_board_info
+	machine_init -> i2c_register_board_info() 
+	来注册挂载设备到linux
+i2c_add_driver();主要分工作有,初始化硬件 注册挂载设备到linux上, 还会自动生成 逻辑设备文件,
+不过 逻辑设备文件 路径是在:/sys/bus/i2c/devices/o-ooso/eeprom 
+与(2)不同:
+	(2)的用户程序要构建事件和信息,然后往逻辑设备执行ioctl操作来实现把读写设备数据
+	(1)打开逻辑设备文件后,直接使用 write/read 来读写数据到设备,不需要构建特定格式的事件和信息数据
+因为(1)里,包构建事件和信息的操作机制集成到驱动里,
+而(2),则把这个机制抛给用户来自己实现
+
+从设备通用驱动注册到linux: 
+	i2c_add_driver -> i2c_register_driver(THIS_MODULE, i2c_driver)
+	-> i2c_driver.driver.bus = &I2C_bus_type.....driver_register(&i2c_driver.driver);(驱动信息挂到 i2c总线设备上)
+	(自动匹配device信息,match后执行 probe把驱动挂到linux上)
+	也就是说从设备的驱动信息先挂到 i2c总线设备上,linux预挂载了一个 总线设备,专门管理i2c设备,
+	probe重点:
+		sysfs_create_bin_file()自动生成 逻辑设备文件,不过 逻辑设备文件 路径是在:/sys/bus/i2c/devices/o-ooso/eeprom
+		(注意没有做什么分配设备号什么的,的操作)
+		也没有初始化典型的ops,而是直接指定自定义了read write 两个访问函数,没有指定自定义open close
+		(不过访问逻辑设备文件,一定要先执行open,分配文件描述符,才可以读写操作,这里没有指定自定义open close
+		 只是因为,使用默认的open close,不需要做其他操作,不逊要硬件操作)	
+	指定自定义的read,write:
+		at24->bin.read = at24_bin_read;
+		at24->bin.write = at24_bin_write;
+	write具体到的硬件操作:
+		at24_bin_write -> at24_write -> at24_eeprom_write
+		-> 生成要发送的一条条message,i2c_transfer(client->adapter,...)递交到与at24硬件链接的第x个i2c控制器,的控制器驱动,执行硬件传输工作
+整个驱动并没有硬件操作,只是构造message,然后把硬件传输的事件提交给adaptor操作,
+而整个驱动文件需要与adaptor打交道的地方在,把构造好的信息message提交硬件发送时,告诉值之使用与at24芯片相接的那个adaptor
+而这个 adaptor 是哪一个,这是一个设备信息,通过把设备信息挂载到 i2c总线设备后,参与match成功便可以获取.
+
+既然AT24C04.c只是给i2c总线设备挂上了驱动信息,那么,i2c总线设备上也要有匹配的设备信息,才会执行 AT24C04.c 上的probe 真正把设备驱动注册到linux上
+而给i2c总线设备挂上设备信息的工作一般是在板文件里如:match-mini2440.c 上的machin_init上;
+static struct at24_platform_data at24c08 = {	//at24的芯片相关数据
+	.byte_len	= SZ_8K / 8,		//多大空间,即多少字节
+	.page_size	= 16,			//每个页大小
+};
+static struct i2c_board_info mini2440_i2c_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("24c08", 0x50),		//24c88是标识,0x50是at24芯片i2c使用的固定物理地址
+		.platform_data = &at24c08,
+	},
+}; 
+static void __init mini2440_init(void)
+{.....	
+	i2c_register_board_info(0, mini2440_i2c_devs,ARRAY_SIZE(mini2440_i2c_devs));//把从设备信息到 __i2c_board_list上
+	//0:指 i2c控制器0这线,
+	//把生成的信息加到了 __i2c_board_list 里,但似乎还没有把设备信息注册到 i2c总线设备上供 从设备驱动 匹配. 
+	//后面发现,原来把设备信息注册到 i2c总线设备上的工作,是 平台设备 i2c控制器0驱动 匹配后执行i2c控制器0的probe->
+	//	i2c_add_numbered_adapter()->i2c_register_adapter->
+	//	i2c_scan_static_board_info()->i2c_new_device()->device_registeer(&client->dev)
+	//	会遍历__i2c_board_list 监测到有使用i2c控制器0 的从设备链表信息项,会为其建立一个新的 i2c_client 数据结构
+	//	然后 device_registeer(&client->dev),才实现了at24设备信息挂到 i2c总线设备上,
+	//	这样后,at24从设备才可以匹配到,注意:然后是先执行 i2c总线设备的probe,丛中跳到 at24 的probe
+	//	而不是直接跳到 at24 的probe		
+
+
+
+
+
+
+
+附加1:添加一个从设备信息
+(网上找的,从操作上看,只是挂入从设备信息到 12c总线设备上,但从后面自动触发的总线匹配等操作的影响看,是在注册和挂载设备到linux上! )
+假设手上有一块从淘宝上买来的开发板，我要在开发板的I2C总线上增加一个从设备（如at24c08），那么我要怎样写这个“I2C设备驱动”，让
+应用程序可以访问at24c08呢? 
+先来看一个最简单的i2c从设备信息：
+static struct i2c_board_info at24cxx_info = { //所支持的i2c设备的列表
+	I2C_BOARD_INFO("at24c08", 0x50),      //一项代表一个支持的设备，它的名字叫做“at24c08”，器件地址是0x50
+};
+static struct i2c_client *at24cxx_client;
+static int at24cxx_dev_init(void)
+{
+	struct i2c_adapter *i2c_adap;    //分配一个适配器的指针
+	i2c_adap = i2c_get_adapter(0);    //调用core层的函数，获得一个i2c总线。这里我们已经知道新增的器件挂接在编号为0的i2c总线上
+	at24cxx_client = i2c_new_device(i2c_adap, &at24cxx_info);	// 把i2c适配器和新增的I2C器件关联起来，
+									// 这个用了i2c总线0，地址是0x50。这就组成了一个客户端   
+	at24cxx_client i2c_put_adapter(i2c_adap);
+	return 0;
+}
+static void at24cxx_dev_exit(void)
+{
+	i2c_unregister_device(at24cxx_client);
+}
+module_init(at24cxx_dev_init);
+module_exit(at24cxx_dev_exit);
+其实，添加i2c设备的方法很灵活。根据Linux的官方文档《linux-3.4.2\Documentation\i2c\instantiating-devices》，添加i2c设备的方法总结有4种：
+1. i2c_register_board_info：根据总线编号、设备名字（“at24c08”）、设备地址（0x50）注册一个字符驱动。
+    这种方法最简单、最粗暴，最贴近平时在开片机上开发i2c器件的。
+2. i2c_new_device：根据i2c总线的编号，声明一个i2c设备：这种方法就是上面例子用的方法。
+    这种方法也简单，但是需要事先知道器件挂接在哪条总线上。对于设备，还实现知道了设备地址0x50，总线适配器也支持名字为“at24c08”的设备
+3. i2c_new_probed_device：
+4. 从用户空间实例化一个器件：这个方法相当智能快速，如下输入指令，即可增加一个i2c设备，同时增加了对应的设备文件。
+	# echo eeprom 0x50 > /sys/bus/i2c/devices/i2c-3/new_device 
+ 
+根据英文文档的标题，添加i2c设备有称之为“i2c设备的实例化”。
+从上述可以知道，在实例化一个i2c设备之前，除了有对应的驱动支持总线外（这里是总线0），
+还需要有一个驱动使用了总线0发送时序，支持名字为"at24c08"的器件。这个驱动用总线驱动的函数，配置了at24c08的寄存器。
+
+
+
+
+/*************************** spi **************************/
+linux SPI子系统组成;
+
+	 访问从设备设备驱动 
+		|
+	    SPI核心层
+		|
+	  SPI控制器驱动 
+
+关于SPI数据传输模型:
+从设备给master 即 spi控制器 递交spi_message (方式是,把传输的message加入master队列)
+每条spi_message 都又多个spi_tansfer操作组成,(把需要的spi_transfer操作挂入nmessage队列)
+每个spi_trandfer就是一个具体的传输工作,就提就是包含放入传输寄存器的内容!!!
+
+每次spi_messsage_add_tail()是给message里的队列挂入一个spi_tranfer
+并没有直接执行硬件操作,硬件操作
+集中在spi_sync()这一指令统一操作!!
+
+spi硬件传输关键:
+cs针选择从设备芯片
+无论是读或者是写从芯片设备,都是cpu主动传输的
+比如读取flash芯片的某地址开始10kb数据:(以下为每个spi_trandfer对应的操作)
+	cpu spi传读指令A到 从芯片,cpu也同时收到从芯片的随机数据,
+	cpu spi传高位地址到 从芯片,cpu也同时收到从芯片的随机数据,
+	cpu spi传低位地址到 从芯片,cpu也同时收到从芯片的随机数据,(即确定了从那个地址开始)
+	cpu spi传读指令B到 从芯片,cpu也同时收到从芯片的 起始地址数据,
+	cpu spi传读指令B到 从芯片,cpu也同时收到从芯片的 下一地址数据,
+	cpu spi传读指令B到 从芯片,cpu也同时收到从芯片的 下一地址数据,
+	....
+比如写入10kb数据到指定地址:
+	cpu spi传写指令A到 从芯片,cpu也同时收到从芯片的随机数据,
+	cpu spi传高位地址到 从芯片,cpu也同时收到从芯片的随机数据,
+	cpu spi传低位地址到 从芯片,cpu也同时收到从芯片的随机数据,(即确定了从那个地址开始)
+	cpu spi传开始字节到 从芯片,cpu也同时收到从芯片的 随机数据,
+	cpu spi传下一字节到 从芯片,cpu也同时收到从芯片的 随机数据,
+	cpu spi传下一字节到 从芯片,cpu也同时收到从芯片的 随机数据,
+	.....
+注意,每一组内容的写操作要重新片选芯片一次,不能一次片选,就直接连续两组写操作!!(一般针对spi_flash芯片)
+例如: 给 从xx地址始写2kb,从yy地址始写入5kb 这是两组写操作,执行第二组前要先重新片选芯片!!从写操作转成读操作时也要重新片选!!!
+为什么?
+因为有可能出现写入的一段内容里,有可能有数据是与操作芯片指令相同,但其不是作为指令,而是要写入的数据,
+为了避免这种冲突!!!
+
+
+linux spi系统的初始化流程(初始化框架与i2c平台的类似):
+1, spi_core 先初始化, 注册和挂载 spi总线设备 到linux上
+2, 加载各种linux模块,大部分的与驱动相关的模块初始化工作都是把自己的 驱动信息 加载到各个已经工作的 总线设备上
+	i2c各路控制器的驱动信息到 挂入平台总线设备上,而各种从设备信息加载到各种总线设备上
+3, 开始 板级初始化,比如来到match_mini210.c,
+	也是注册 各种从设备信息到 spi_设备链表 里 ,
+	
+4, 给 平台总线设备 挂入 spi平台设备信息,监测到设备信息的加入就会自动匹配,成功匹配就会 注册挂载设备到linux上
+	匹配成功的 每个spi控制器设备和驱动,会执行probe初始化,probe初始化也会,
+	遍历spi_设备链表的项,然后把与自己相关 的从设备信息挂入 spi总线设备
+	//从设备信息挂入 spi总线设备 这一步与i2c对应的一步,有些区别,主要是,没有使用device_register(),而是分拆了:
+	//s3c64xx_spi_probe() -> spi_register_master()->
+	//(遍历操作)list_for_each_entry(bi,&board_list,list){spi_match_master_to_boardinfo}->
+	//spi_newdevice()->spi_add_device()
+	//	->spi_alloc_device()(具体取代device_register()的device_initialize操作在这里)
+	//	->spi_add_device()(具体取代device_register()的device_add操作在这里)
+5,  spi总线设备收到设备信息后,就开始匹配驱动信息,匹配到,会跳到 i2c总线设备的probe,(注意,并不会直接跳到设备上的probe)
+	然后再从中跳到跳到设备上的外围probe,然后执行具体的初始化,注册挂载设备到linux上.
+(基本与i2c系统的初始化类似)!!
+					
+关于SPI控制器驱动:
+参考SPI_s3c24xx.c
+platform_driver_probe() module_init()
+驱动信息挂入平台总线并匹配,成功后,执行s2c24XX_spi_probe()初始化并注册挂载设备到linux
+控制器是的工作是给硬件设备发送字节流,而发送的方式也是通过中断处理发送下一字节...
+
+访问从设备设备驱动:
+参照 m25p80.c (SPI FLASH)
+SPI_register_driver() module_init()
+访问从设备设备驱动也是通过构建事件和信息的操作机制来,访问从设备,这些内容最终通过spi控制能驱动来传输到实质从设备里去
+特别注意 SPI_sync 与 SPI_async 是SPI核心层 与 访问从设备设备驱动 的接口
+
+对于 总线设备 与 spi 系统的核心内容,的深入理解,另外见 spi/spi系统与总线设备
+
+
+
+
+
+
+
+/*************************** mtd **************************/
+Mtd子系统简化了flash驱动的开发:
+架构:
+	文件系统 yaffs2/cramfs
+		|
+	   MTD快设备----------------MTD设备层		\ linux	
+					|		| 上的
+				    MTD原始设备层	> MTD
+					|		| 子系统
+				    MTD通用驱动程序	/
+					|
+				    flash驱动----->spi falsh
+						|->nand flash	
+						|...
+
+不是建立在 MTD 子系统下的 flash驱动, 需要补充更多通用的功能,例如申请块设备,读写纠错等
+建立在 MTD 子系统下的 flash驱动,只需完成特定的功能,通用的功能由mtd子系统承担
+	例如,MTD设备层 负责注册快设备,MTD原始设备层,完成分区工作, 等等...
+
+关于MTD的分区:就是,划分flash空间,分别放置 bootloader 内黑镜像, 文件系统镜像,
+smart210分区表放在 driver/mtd/nand/s3c_nand.c
+flash驱动 参考例子:s3c_nand.c
+
+
+/*************************** usb **************************/
+
+linux 主机USB子系统组成;
+
+	 访问从设备设备驱动 	
+		|
+	    USB核心
+		|
+	  USB主控制器驱动
+
+访问从设备设备驱动:
+一个设备驱动对应的角色是多个端口,虽然一个端口代表一个功能,里应该单独分配一个次设备,
+但是访问从设备设备驱动,使用递交urb的机制,所以可以分配一个次设备号,或少数次设备号来 集中处理一堆端口
+每次urb请求的意旨都是访问特定的端点,
+注意,usb从来都是主机控制器,轮询方式主动联系,所有插入的从设备的从机控制器的.因为usb通讯是半双工,差分信号实现的	
+每个端点都有数据方向的属性,但是,不代表已经分配好管道,所以还得给端点配置管道
+
+
+
+
+
+
+
+HID协议<就是urb回的数据帧是符合HID协议格式的数据
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

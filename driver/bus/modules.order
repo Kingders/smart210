@@ -1,0 +1,3 @@
+kernel//home/kingders/smart210/driver/bus/bus.ko
+kernel//home/kingders/smart210/driver/bus/device.ko
+kernel//home/kingders/smart210/driver/bus/driver.ko

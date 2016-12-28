@@ -1,0 +1,116 @@
+
+a) 总线注册：bus_register
+	Linux bus的注册都是通过bus_register()实现，以下是注册过程：
+	bus_register(bus_type *bus)
+		|
+		|
+		---->	kset_register(kset *k)
+		|	(注册总线子系统,会在sys/bus/ 目录下产生一个新的总线目录)
+		|
+		---->	kset_create_and_add("device",NULL,&priv->subsys.kobj)
+		|	(为该总线创建并添加设备集合)
+		|
+		---->	kset_create_and_add("drivers",NULL,&priv->subsys.kobj)
+			(为该总线创建并添加驱动集合)
+
+b) 设备和驱动注册：device_register 和 driver_register
+	Linux device的注册是通过device_register实现， Linux driver的注册是通过driver_register实现，以下是注册过程：
+	device_register(struct device *dev)		driver_register(struct device_driver *drv)
+	|						|
+	|						|
+	-->device_initialize(dev)			-->bus_add_driver(drv)
+	|						   |
+	|						   |
+	-->device_add(dev)				   -->if(drv->bus->p->drivers_autoprobe)
+	   |						        driver_attach(drv)
+	   |						      	|
+	   -->bus_add_device(drv)				-->bus_for_each_dev(drv->bus,null,drv,_driver_attach)
+	   |						      	   |
+	   |						      	   |
+	   -->bus_probe_device(dev)				   |
+	      |						      	   |
+	      -->if(dev->bus->p->drivers_autoprobe)		   |
+	           device_attach(dev)			           |
+	           |					           |
+		   |  ___________________________________	   |			
+		   -->|if(dev->driver)			|	   --> __driver_attach(dev,drv)
+		      |  device_bind_driver(dev)	|		 |
+		      |else				|		 |
+		      |  bus_for_each_drv(dev->bus,	|		 |
+		      |       NULL,dev,__driver_attach)	|		 |
+		      |_________________________________|		 |
+			  |						 |
+			  |						 |
+			  --> __device_attach(dev,drv)			 |
+			  		  |			         |
+					  |______________________________|
+						|
+						|
+						-->driver_match_device(drv,dev)
+						|
+						|
+						-->driver_probe_device(drv,dev)	
+						   |
+						   -->really_probe(dev,drv)
+						      |  ______________________________	   	
+						      -->|if(dev->bus->probe)	       |
+						      |  |  ret=dev->bus->probe(dev)   |
+						      |  |else if(drv->probe)	       |
+						      |  |  ret=drv->probe(dev)	       |
+						      |  |if(ret=FAIL)                 |
+						      |  |   dev->driver =NULL         |
+						      |  |_____________________________|
+						      |
+						      -->driver_bound(dev)
+							 |
+							 |
+							 -->klist_add_tail(&dev->p->knode_driver,
+								&dev->driver->p->klist_devices)
+
+3. 总线、设备、驱动结构中，总线的match函数负责匹配驱动与设备；然后匹配成功后会调用驱动中的probe函数，卸载驱动或设备的时候后调用release函数. driver的注册，主要涉及将自身挂接到bus的driver链表，并将匹配到的设备加入自己的device链表，并且将匹配到的device的 driver成员初始化为该driver，私有属性的driver节点也挂到driver的设备链表下，其中匹配函数是利用利用bus的match函数，该函数通常判断如果driver有id表，就查表匹配，如果没有就用driver和device名字匹配。当匹配成功后如果自动初始化标志允许则调用初始化函数probe，bus的probe优先级始终高于driver的。
+
+
+
+浅析linux 2.6.23 bus总线模型下match()和probe()函数调用顺序
+文章来源:http://gliethttp.cublog.cn
+将driver驱动内嵌的kobj对象添加到管理该driver的总线层次管理集合kset所管理的链表中,
+然后调用driver_attach()函数,遍历驱动所在bus总线的设备链表klist_devices检测该driver
+驱动程式是否能为bus总线上未获得驱动的device设备提供驱动,进一步通过__driver_attach()
+函数检测设备是否能被该driver驱动管理.
+__driver_attach()->driver_probe_device()->调用bus总线的match函数drv->bus->match()
+之后在really_probe()中dev->driver = drv;驱动和设备通过driver_sysfs_add()建立符号链接,
+使得驱动能够真正的通过VFS文件接口操作dev设备,如果dev->bus->probe()存在那么调用之,
+否则如果drv->probe()存在那么调用之,
+最后调用driver_bound()将klist_add_tail(&dev->knode_driver, &dev->driver->klist_devices);
+设备的knode_driver节点链接到驱动的klist_devices设备链表上[对于bus_attach_device同样是这样]
+所以当insmod手动安装驱动程式或usb-hub端口检测到usb设备插入后调用add_device添加设备时,
+均通过如下2步自动检测驱动和设备是否匹配,来为设备安装驱动或为驱动寻找设备:
+1.drv->bus->match()首先调用驱动或设备所属bus总线提供的match函数,初步检测在bus总线级别是否能匹配
+2.dev->bus->probe()如果不存在,那么调用drv->probe(),更周详的检测驱动和设备的匹配程度.
+对于usb系统match函数由usb系统自有的usb_bus_type结构体提供,usb的bus系统不提供probe()函数,必须由用户
+的驱动程式提供,比如:mct_u232_driver->probe()函数会使用用户驱动结构体提供的id表--id_table,根据match_flags
+标志,来检索usb id表中的厂商号、产品号、设备号、设备类型、设备子类、设备协议、接口类型、接口子类或
+接口协议等是否有按照匹配标志match_flags匹配运算后和匹配需求符合的设备,如果有那么说明驱动和设备匹配上了,
+设备找到了管理他的驱动,驱动的klist_devices链表上又多了一个他要管理的设备小baby(gliethttp_20071029). 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

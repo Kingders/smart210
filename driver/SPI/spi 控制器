@@ -1,0 +1,1152 @@
+
+http://blog.csdn.net/apple_guet/article/details/21449113
+
+一、SPI总线驱动介绍
+
+        SPI总线总共需要四根线，包括MOSI、MISO、CLK和CS。本文首先从SPI设备注册开始来讲述SPI总线驱动。
+二、设备注册
+
+        在系统启动的时候，会按照顺序执行一些初始化程序，比如device_initcall和module_init等宏。这些宏是按照顺序执行的，
+比如device_initcall的优先级高于module_init，现在我们看下在系统启动的时候注册的spi设备信息。
+
+        程序如下：
+
+点击(此处)折叠或打开
+
+    /* SPI controller */
+    #if defined(CONFIG_GSC3280_SPI)
+
+    #ifdef CONFIG_SPI1
+    static struct resource spi1_resources[] = {
+            [0] = {
+                    .start    = GSC3280_SPI1_BASEADDR & 0x1fffffff,
+                    .end    = (GSC3280_SPI1_BASEADDR & 0x1fffffff)+ 0x54 - 1 ,
+                    .flags    = IORESOURCE_MEM,
+            },
+            [1] = {
+                    .start    = EXT_GSC3280_SPI1_IRQ,
+                    .end    = EXT_GSC3280_SPI1_IRQ,
+                    .flags    = IORESOURCE_IRQ,
+            },
+    };
+    static struct platform_device gsc3280_spi1_device = {
+            .name            = "gsc3280-spi",
+            .id                = 1,
+
+    #ifdef CONFIG_GSC3280_SPI_DMA
+            .dev            = {
+            .dma_mask            = NULL,
+            .coherent_dma_mask    = DMA_BIT_MASK(32),
+            .platform_data        = NULL,
+            },
+    #endif
+            .resource        = spi1_resources,
+            .num_resources    = ARRAY_SIZE(spi1_resources),
+    };
+    #endif
+    /* SPI devices */
+    #if defined(CONFIG_SPI_FLASH_W25Q)
+     static struct gsc3280_spi_info w25q_spi1_dev_platdata = {
+        .pin_cs            = 87,
+        .num_cs            = 1,
+        .cs_value            = 0,
+        .lsb_flg            = 0,
+        .bits_per_word    = 8,
+    };
+    #endif
+    static struct spi_board_info gsc3280_spi_devices[] = {
+    #if defined(CONFIG_SPI_FLASH_W25Q)
+        {
+            .modalias        = "spi-w25q",
+            .bus_num        = 1,
+            .chip_select        = 3,
+            .mode            = SPI_MODE_3,
+            .max_speed_hz    = 5 * 1000 * 1000,
+            .controller_data    = &w25q_spi1_dev_platdata,
+        },
+    #endif
+
+    };
+    static int __init gsc3280_spi_devices_init(void)
+    {
+        spi_register_board_info(gsc3280_spi_devices, ARRAY_SIZE(gsc3280_spi_devices));
+        return 0;
+    }
+    device_initcall(gsc3280_spi_devices_init);
+    #endif    //end #if defined(CONFIG_GSC3280_SPI) 
+
+        注意到此处共定义两个设备，使用spi_register_board_info()函数对spi设备进行注册，程序如下：
+
+点击(此处)折叠或打开
+
+    int __init
+    spi_register_board_info(struct spi_board_info const *info, unsigned n)
+    {
+        struct boardinfo *bi;
+        int i;
+
+        bi = kzalloc(n * sizeof(*bi), GFP_KERNEL);
+        if (!bi)
+            return -ENOMEM;
+
+        for (i = 0; i < n; i++, bi++, info++) {
+            struct spi_master *master;
+
+            memcpy(&bi->board_info, info, sizeof(*info));
+            mutex_lock(&board_lock);
+            list_add_tail(&bi->list, &board_list);
+            list_for_each_entry(master, &spi_master_list, list)
+                spi_match_master_to_boardinfo(master, &bi->board_info);
+            mutex_unlock(&board_lock);
+        }
+
+        return 0;
+    }
+
+        对于此处，n为1，在程序中首先创建相应的内存，在for循环中，将信息保存到内存中，然后插入board_list链表，接着遍历
+spi_master_list链表，注意此处，由于device_initcall的优先级高于module_init，所以此时spi_master_list链表为空，那么还
+不能调用spi_match_master_to_boardinfo函数创建spi设备，具体的创建设备将在spi总线驱动的探测函数中，使用spi_register_master()
+函数创建设备。
+三、总线驱动探测、退出和电源管理函数
+3.1、探测函数gsc3280_spi_probe
+
+    程序如下：
+
+点击(此处)折叠或打开
+
+    static int __init gsc3280_spi_probe(struct platform_device *pdev)
+    {
+        int ret = 0;
+        struct gsc3280_spi *gscs;
+        struct spi_master *master;
+        struct resource *mem, *ioarea;
+
+        DBG("############\n");
+        DBG("gsc3280 spi probe start\n");
+        master = spi_alloc_master(&pdev->dev, sizeof(struct gsc3280_spi));
+        if (!master) {
+            ret = -ENOMEM;
+            DBG("!!!!spi_alloc_master error\n");
+            goto exit;
+        }
+        gscs = spi_master_get_devdata(master);
+        memset(gscs, 0, sizeof(struct gsc3280_spi));
+        gscs->master = spi_master_get(master);
+        mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+        if (!mem) {
+            DBG("!!!!no mem resource!\n");
+            ret = -EINVAL;
+            goto err_kfree;
+        }
+        ioarea = request_mem_region(mem->start, resource_size(mem), pdev->name);
+        if (!ioarea) {
+            DBG("!!!!SPI region already claimed!\n");
+            ret = -EBUSY;
+            goto err_kfree;
+        }
+        gscs->regs = ioremap_nocache(mem->start, resource_size(mem));
+        if (!gscs->regs) {
+            DBG("!!!!SPI ioremap error!\n");
+            ret = -ENOMEM;
+            goto err_release_reg;
+        }
+        DBG("gscs->regs = 0x%p\n", gscs->regs);
+        gscs->irq = platform_get_irq(pdev, 0);
+        if (gscs->irq < 0) {
+            DBG("!!!!no irq resource!\n");
+            ret = gscs->irq;
+            goto err_unmap;
+        }
+        ret = request_irq(gscs->irq, gsc3280_spi_irq, IRQF_DISABLED, dev_name(&pdev->dev), gscs);
+        if (ret < 0) {
+            DBG("!!!!can not get IRQ!\n");
+            goto err_irq;
+        }
+        gscs->clk = clk_get(NULL, "spi1");
+        if (IS_ERR(gscs->clk)) {
+            DBG("!!!!failed to find spi1 clock source!\n");
+            ret = PTR_ERR(gscs->clk);
+            goto err_irq;
+        }
+        gscs->max_freq = clk_get_rate(gscs->clk);
+        DBG("rate is %d\n", gscs->max_freq);
+        clk_enable(gscs->clk);
+        gscs->bus_num = pdev->id;
+        gscs->num_cs = 4;
+        gscs->prev_chip = NULL;
+        INIT_LIST_HEAD(&gscs->queue);
+        spin_lock_init(&gscs->slock);
+        
+    #ifdef CONFIG_GSC3280_SPI_DMA
+        gscs->dma_priv = pdev->dev.platform_data = &spi_platform_data;
+        if (!gscs->dma_priv)
+            goto err_clk;    //return -ENOMEM;
+        gscs->dma_ops = &gscs_dma_ops;
+        gscs->dma_inited = 0;
+        gscs->dma_addr = (dma_addr_t)(gscs->regs + 0x24) & 0x1fffffff;
+    #endif
+
+        platform_set_drvdata(pdev, master);
+        master->mode_bits = SPI_CPOL | SPI_CPHA;
+        master->bus_num = gscs->bus_num;
+        master->num_chipselect = gscs->num_cs;
+        master->cleanup = gsc3280_spi_cleanup;
+        master->setup = gsc3280_spi_setup;
+        master->transfer = gsc3280_spi_transfer;
+        gsc3280_spi_hw_init(gscs);
+
+    #ifdef CONFIG_SPI_GSC3280_DMA
+        if (gscs->dma_ops && gscs->dma_ops->dma_init) {
+            ret = gscs->dma_ops->dma_init(gscs);
+            if (ret) {
+                dev_warn(&master->dev, "DMA init failed\n");
+                gscs->dma_inited = 0;
+            }
+        }
+    #endif
+
+        ret = gsc3280_init_queue(gscs);
+        if (ret != 0) {
+            DBG("!!!!problem initializing queue!\n");
+            goto err_diable_hw;
+        }
+        ret = gsc3280_start_queue(gscs);
+        if (ret != 0) {
+            DBG("!!!!problem starting queue!\n");
+            goto err_queue_alloc;
+        }
+        ret = spi_register_master(master);
+        if (ret != 0) {
+            DBG("!!!!register spi master error!\n");
+            goto err_queue_alloc;
+        }
+        DBG("gsc3280 spi probe success\n");
+        DBG("############\n");
+        return 0;
+
+    //err_free_master:
+        //spi_master_put(master);
+    err_queue_alloc:
+        gsc3280_spi_destroy_queue(gscs);
+    #ifdef CONFIG_SPI_GSC3280_DMA
+        if (gscs->dma_ops && gscs->dma_ops->dma_exit)
+            gscs->dma_ops->dma_exit(gscs);
+    #endif
+    err_diable_hw:
+        gsc3280_enable_spi(gscs, GSC_SPI_DISABLE);
+    //err_clk:
+        clk_disable(gscs->clk);
+        clk_put(gscs->clk);
+    err_irq:
+        free_irq(gscs->irq, gscs);
+    err_unmap:
+        iounmap(gscs->regs);
+    err_release_reg:
+        release_mem_region(mem->start, resource_size(mem));
+    err_kfree:
+        kfree(gscs);
+        kfree(master);
+    exit:
+        printk(KERN_ERR "!!!!!!gsc3280 probe error!!!!!!\n");
+        return ret;
+    } 
+
+        说明：
+
+        1) 首先是总线资源的注册，包括申请IO空间和中断。
+
+        2) 接下来注册了中断函数。
+
+        3) 然后注册了spi_master所需要的函数，包括清除、设置和传输等函数，在四中会讲述。
+
+        4) gsc3280_spi_hw_init函数初始化了SPI总线寄存器，接下来讲述。
+
+        5) 总线驱动采用queue机制实现多设备SPI读写，接下来初始化和启动了queue，接下来讲述。
+
+        6) 使用spi_register_master函数注册master，此函数即实现创建了SPI设备结构体，接下来讲述。
+
+        SPI总线寄存器初始化函数gsc3280_spi_hw_init：
+
+点击(此处)折叠或打开
+
+    /* Restart the controller, disable all interrupts, clean fifo */
+    static void gsc3280_spi_hw_init(struct gsc3280_spi *gscs)
+    {
+        gsc3280_enable_spi(gscs, GSC_SPI_DISABLE);
+        gsc3280_spi_mask_intr(gscs, GSC_SPI_SR_MASK);
+        if (!gscs->fifo_len) {
+            gscs->fifo_len = 0x10;
+            __raw_writew(0x00, gscs->regs + GSC_SPI_TXFTLR);
+            __raw_writew(0x00, gscs->regs + GSC_SPI_RXFTLR);
+        }
+        gsc3280_enable_spi(gscs, GSC_SPI_ENABLE);
+    } 
+
+        由程序可以看出，此函数首先禁止SPI，屏蔽中断，然后设置fifo深度，最后使能SPI。
+
+        初始化queue函数gsc3280_init_queue：
+
+点击(此处)折叠或打开
+
+    static int __devinit gsc3280_init_queue(struct gsc3280_spi *gscs)
+    {
+        gscs->queue_state = GSC_SPI_QUEUE_STOP;
+        gscs->busy = 0;
+        tasklet_init(&gscs->pump_transfers, gsc3280_spi_pump_transfers, (unsigned long)gscs);
+        INIT_WORK(&gscs->pump_messages, gsc3280_spi_pump_messages);
+        gscs->workqueue = create_singlethread_workqueue(dev_name(gscs->master->dev.parent));
+        if (gscs->workqueue == NULL) {
+            DBG("!!!!create_singlethread_workqueue error!\n");
+            return -EBUSY;
+        }
+        else
+            return 0;
+    } 
+
+        由程序看出，此函数主要完成初始化队列的作用，包括对queue函数的初始化，最后创建了queue。
+        开始queue函数gsc3280_start_queue：
+
+点击(此处)折叠或打开
+
+    static int gsc3280_start_queue(struct gsc3280_spi *gscs)
+    {
+        unsigned long flags;
+
+        spin_lock_irqsave(&gscs->lock, flags);
+        if ((gscs->run == GSC_SPI_QUEUE_RUN) || gscs->busy) {
+            spin_unlock_irqrestore(&gscs->lock, flags);
+            return -EBUSY;
+        }
+        gscs->run = GSC_SPI_QUEUE_RUN;
+        gscs->cur_msg = NULL;
+        gscs->cur_transfer = NULL;
+        gscs->cur_chip = NULL;
+        gscs->prev_chip = NULL;
+        spin_unlock_irqrestore(&gscs->lock, flags);
+        queue_work(gscs->workqueue, &gscs->pump_messages);
+        return 0;
+    } 
+
+        此函数首先对queue的状态进行判断，然后初始化相关成员变量，最后调度queue。
+
+        最后看下master注册函数spi_register_master：
+
+点击(此处)折叠或打开
+
+    int spi_register_master(struct spi_master *master)
+    {
+        static atomic_t        dyn_bus_id = ATOMIC_INIT((1<<15) - 1);
+        struct device        *dev = master->dev.parent;
+        struct boardinfo    *bi;
+        int            status = -ENODEV;
+        int            dynamic = 0;
+
+        if (!dev)
+            return -ENODEV;
+
+        /* even if it's just one always-selected device, there must
+         * be at least one chipselect
+         */
+        if (master->num_chipselect == 0)
+            return -EINVAL;
+
+        /* convention: dynamically assigned bus IDs count down from the max */
+        if (master->bus_num < 0) {
+            /* FIXME switch to an IDR based scheme, something like
+             * I2C now uses, so we can't run out of "dynamic" IDs
+             */
+            master->bus_num = atomic_dec_return(&dyn_bus_id);
+            dynamic = 1;
+        }
+
+        spin_lock_init(&master->bus_lock_spinlock);
+        mutex_init(&master->bus_lock_mutex);
+        master->bus_lock_flag = 0;
+
+        /* register the device, then userspace will see it.
+         * registration fails if the bus ID is in use.
+         */
+        dev_set_name(&master->dev, "spi%u", master->bus_num);
+        status = device_add(&master->dev);
+        if (status < 0)
+            goto done;
+        dev_dbg(dev, "registered master %s%s\n", dev_name(&master->dev),
+                dynamic ? " (dynamic)" : "");
+
+        mutex_lock(&board_lock);
+        list_add_tail(&master->list, &spi_master_list);
+        list_for_each_entry(bi, &board_list, list)
+            spi_match_master_to_boardinfo(master, &bi->board_info);
+        mutex_unlock(&board_lock);
+
+        status = 0;
+
+        /* Register devices from the device tree */
+        of_register_spi_devices(master);
+    done:
+        return status;
+    }
+    EXPORT_SYMBOL_GPL(spi_register_master); 
+
+        说明：
+
+        1) 首先对master成员变量进行检查。
+
+        2) 初始化成员变量。
+
+        3) 将master->list插入到spi_master_list链表中。
+
+        4) 语句list_for_each_entry(bi, &board_list, list)实现遍历board_list链表，在二设备注册中已经讲述了将设备插入到
+board_list链表中。此时的board_list链表不为空，已经有相应设备结构体信息了。
+
+        5) 语句spi_match_master_to_boardinfo(master, &bi->board_info);实现设备的创建，函数程序如下：
+
+点击(此处)折叠或打开
+
+    static void spi_match_master_to_boardinfo(struct spi_master *master,
+                    struct spi_board_info *bi)
+    {
+        struct spi_device *dev;
+
+        if (master->bus_num != bi->bus_num)
+            return;
+
+        dev = spi_new_device(master, bi);
+        if (!dev)
+            dev_err(master->dev.parent, "can't create new device for %s\n",
+                bi->modalias);
+    } 
+
+        说明：
+
+        1) 函数首先判断master的总线号和设备的总线号是否相等，如果不等直接返回。
+
+        2) 函数spi_new_device(master, bi);实现设备创建，如下：
+
+点击(此处)折叠或打开
+
+    struct spi_device *spi_new_device(struct spi_master *master,
+                     struct spi_board_info *chip)
+    {
+        struct spi_device    *proxy;
+        int            status;
+
+        /* NOTE: caller did any chip->bus_num checks necessary.
+         *
+         * Also, unless we change the return value convention to use
+         * error-or-pointer (not NULL-or-pointer), troubleshootability
+         * suggests syslogged diagnostics are best here (ugh).
+         */
+
+        proxy = spi_alloc_device(master);
+        if (!proxy)
+            return NULL;
+
+        WARN_ON(strlen(chip->modalias) >= sizeof(proxy->modalias));
+
+        proxy->chip_select = chip->chip_select;
+        proxy->max_speed_hz = chip->max_speed_hz;
+        proxy->mode = chip->mode;
+        proxy->irq = chip->irq;
+        strlcpy(proxy->modalias, chip->modalias, sizeof(proxy->modalias));
+        proxy->dev.platform_data = (void *) chip->platform_data;
+        proxy->controller_data = chip->controller_data;
+        proxy->controller_state = NULL;
+
+        status = spi_add_device(proxy);
+        if (status < 0) {
+            spi_dev_put(proxy);
+            return NULL;
+        }
+
+        return proxy;
+    }
+    EXPORT_SYMBOL_GPL(spi_new_device);
+
+    struct spi_device *spi_alloc_device(struct spi_master *master)
+    {
+        struct spi_device    *spi;
+        struct device        *dev = master->dev.parent;
+
+        if (!spi_master_get(master))
+            return NULL;
+
+        spi = kzalloc(sizeof *spi, GFP_KERNEL);
+        if (!spi) {
+            dev_err(dev, "cannot alloc spi_device\n");
+            spi_master_put(master);
+            return NULL;
+        }
+
+        spi->master = master;
+        spi->dev.parent = dev;
+        spi->dev.bus = &spi_bus_type;
+        spi->dev.release = spidev_release;
+        device_initialize(&spi->dev);
+        return spi;
+    }
+    EXPORT_SYMBOL_GPL(spi_alloc_device); 
+
+        说明：
+
+        1) 首先调用spi_alloc_device函数创建设备内存，从spi_alloc_device函数中可以看到，首先申请内存，然后对设备程序进行赋值。
+
+        2) 接下来将芯片的信息赋值给设备结构体，包括片选、最大速率、模式、中断和名称等。此处名称尤为重要，在spi设备的注册函数
+spi_register_driver中，就是通过名称找到相应的设备信息结构体的。
+
+        3) 程序status = spi_add_device(proxy);实现添加spi设备信息。此函数在--Linux spi驱动分析(二)----spi内核中讲述。
+3.2、移除函数gsc3280_spi_remove
+
+        程序如下：
+
+点击(此处)折叠或打开
+
+    void __exit gsc3280_spi_remove(struct platform_device *pdev)
+    {
+        int status = 0;
+        struct spi_master *master = platform_get_drvdata(pdev);
+        struct gsc3280_spi *gscs = spi_master_get_devdata(master);
+
+        if (!gscs)
+            return;
+        status = gsc3280_spi_destroy_queue(gscs);
+        if (status != 0)
+            dev_err(&gscs->master->dev, "gsc3280_spi_remove: workqueue will not "
+                "complete, message memory not freed\n");
+
+    #ifdef CONFIG_SPI_GSC3280_DMA
+        if (gscs->dma_ops && gscs->dma_ops->dma_exit)
+            gscs->dma_ops->dma_exit(gscs);
+    #endif
+
+        gsc3280_enable_spi(gscs, GSC_SPI_DISABLE);
+        free_irq(gscs->irq, gscs);
+        iounmap(gscs->regs);
+        spi_unregister_master(gscs->master);
+    } 
+
+        说明：
+
+        1) 首先获得总线结构体
+
+        2) 然后删除queue
+
+        3) 最后禁止SPI，释放中断和IO，最后注销master。
+3.3、挂起函数gsc3280_spi_suspend
+
+        程序如下：
+
+点击(此处)折叠或打开
+
+    static int gsc3280_spi_suspend(struct platform_device *pdev, pm_message_t mesg)
+    {
+        int ret = 0;
+        struct spi_master *master = platform_get_drvdata(pdev);
+        struct gsc3280_spi *gscs = spi_master_get_devdata(master);
+
+        ret = gsc3280_spi_stop_queue(gscs);
+        if (ret)
+            return ret;
+        gsc3280_enable_spi(gscs, GSC_SPI_DISABLE);
+        return ret;
+    } 
+
+        程序中首先停止queue，然后禁止SPI。
+
+        停止queue函数内容如下：
+
+点击(此处)折叠或打开
+
+    static int gsc3280_spi_stop_queue(struct gsc3280_spi *gscs)
+    {
+        int status = 0;
+        unsigned long flags;
+        unsigned limit = 50;
+        
+        spin_lock_irqsave(&gscs->lock, flags);
+        while ((!list_empty(&gscs->queue) || gscs->busy) && limit--) {
+            spin_unlock_irqrestore(&gscs->lock, flags);
+            msleep(10);
+            spin_lock_irqsave(&gscs->lock, flags);
+        }
+        if (!list_empty(&gscs->queue) || gscs->busy)
+            status = -EBUSY;
+        else
+            gscs->queue_state = GSC_SPI_QUEUE_STOP;
+        spin_unlock_irqrestore(&gscs->lock, flags);
+        return status;
+    } 
+
+        程序首先遍历queue链表，查看是否还有queue没有执行，总共尝试50次，如果还有queue没有执行或者设备忙，则错误返回，否
+则置正确queue状态。
+3.4、恢复函数gsc3280_spi_resume
+
+        程序如下：
+
+点击(此处)折叠或打开
+
+    static int gsc3280_spi_resume(struct platform_device *pdev)
+    {
+        int ret = 0;
+        struct spi_master *master = platform_get_drvdata(pdev);
+        struct gsc3280_spi *gscs = spi_master_get_devdata(master);
+
+        gsc3280_spi_hw_init(gscs);
+        ret = gsc3280_start_queue(gscs);
+        if (ret)
+            dev_err(&gscs->master->dev, "fail to start queue (%d)\n", ret);
+        return ret;
+    } 
+
+        程序主要初始化SPI寄存器，然后开始运行queue。
+四、spi master支持函数
+4.1、清除函数gsc3280_spi_cleanup
+
+点击(此处)折叠或打开
+
+    static void gsc3280_spi_cleanup(struct spi_device *spi)
+    {
+        struct chip_data *chip = spi_get_ctldata(spi);
+        kfree(chip);
+    } 
+
+        程序首先获取设备指针，然后释放内存。
+4.2、设置函数gsc3280_spi_setup
+
+        此函数是一个回调函数，spi核心中的spi_setup()函数会调用此函数，程序如下：
+
+点击(此处)折叠或打开
+
+    /* This may be called twice for each spi dev */
+    static int gsc3280_spi_setup(struct spi_device *spi)
+    {
+        int ret = 0;
+        struct chip_data *chip = NULL;
+        struct gsc3280_spi_info *chip_info = NULL;
+
+        DBG("######gsc3280 spi bus setup start######\n");
+        chip = spi_get_ctldata(spi);        /* Only alloc on first setup */
+        if (!chip) {
+            chip = kzalloc(sizeof(struct chip_data), GFP_KERNEL);
+            if (!chip) {
+                DBG("!!!!kzalloc error!\n");
+                ret = -ENOMEM;
+                goto exit;
+            }
+        }
+        chip_info = spi->controller_data;
+        /* chip_info doesn't always exist */
+        if (chip_info) {
+    #ifdef CONFIG_GSC3280_SPI_DMA
+            chip->poll_mode = chip_info->poll_mode;
+            chip->enable_dma = chip_info->enable_dma;
+    #endif
+            chip->pin_cs = chip_info->pin_cs;
+            chip->cs_value = chip_info->cs_value;
+            chip->bits_per_word = chip_info->bits_per_word;
+            chip->lsb_flg = chip_info->lsb_flg;
+            gpio_request(chip->pin_cs, spi->modalias);
+            if (chip->cs_value == 0)
+                gpio_direction_output(chip->pin_cs, 1);
+            else
+                gpio_direction_output(chip->pin_cs, 0);
+        }
+        if (spi->bits_per_word == 8) {
+            chip->n_bytes = 1;
+    #ifdef CONFIG_GSC3280_SPI_DMA
+            chip->dma_width = 1;
+    #endif
+        } else if (spi->bits_per_word == 16) {
+            chip->n_bytes = 2;
+    #ifdef CONFIG_GSC3280_SPI_DMA
+            chip->dma_width = 2;
+    #endif
+        } else {
+            DBG("!!!!spi->bits_per_word = %d error!\n", spi->bits_per_word);
+            ret = -EINVAL;
+            goto exit;
+        }
+        if (!spi->max_speed_hz) {
+            DBG("!!!!spi->max_speed_hz = %d, error!\n", spi->max_speed_hz);
+            ret = -EINVAL;
+            goto exit;
+        }
+        chip->speed_hz = spi->max_speed_hz;
+        chip->cr = (chip->lsb_flg << GSC_SPI_CTL_BITS_NUM) | (spi->mode << GSC_SPI_CTL_MOD)
+                    | ((chip->bits_per_word - 1) << GSC_SPI_CTL_DSS);
+        spi_set_ctldata(spi, chip);
+
+    exit:
+        if (ret != 0)
+            DBG("!!!!gsc3280 spi bus setup error!\n");
+        else
+            DBG("######gsc3280 spi bus setup success######\n");
+        return ret;
+    } 
+
+        说明：
+
+        1) 首先判断参数，如果参数错误，直接返回。
+
+        2) 获取spi控制数据，如果没有，则申请内存创建设备。
+
+        3) 接下来根据实际情况对设备结构体赋值。
+4.3、传输函数gsc3280_spi_transfer
+
+        此函数尤为重要，SPI设备传输数据时，就是调用此函数实现数据传输的，此函数主要完成结构体成员变量的
+初始化，具体的传输在中断中进行。
+
+点击(此处)折叠或打开
+
+    /* spi driver call this function transfer data */
+    static int gsc3280_spi_transfer(struct spi_device *spi, struct spi_message *msg)
+    {
+        unsigned long flags = 0;
+        struct gsc3280_spi *gscs = spi_master_get_devdata(spi->master);
+
+        DBG("####gsc3280 spi transfer start####\n");
+        if (gscs->queue_state == GSC_SPI_QUEUE_STOP) {
+            DBG("!!!!queue is stop!\n");
+            return -ESHUTDOWN;
+        }
+        msg->actual_length = 0;
+        msg->status = -EINPROGRESS;
+        msg->state = START_STATE;
+        spin_lock_irqsave(&gscs->slock, flags);
+        list_add_tail(&msg->queue, &gscs->queue);
+        spin_unlock_irqrestore(&gscs->slock, flags);
+        //writel(0x3f, (volatile unsigned int *)(0xbc04a000 + 0x38));    //max divid freq
+        if (gscs->cur_transfer || gscs->cur_msg) {
+            //DBG("gsc3280_spi_transfer: cur transfer or msg not empty\n");
+        } else {
+            //DBG("gsc3280_spi_transfer: no cur transfer and msg\n");
+            queue_work(gscs->workqueue, &gscs->pump_messages);
+        }
+        DBG("####gsc3280 spi transfer success####\n");
+        return 0;
+    } 
+
+        说明：
+
+        1) 首先判断queue状态，如果是停止状态，则退出。
+
+        2) 对传送结构体成员变量赋值。
+
+        3) 判断当前是否有数据在收发，如果有，就先直接返回。
+
+        4) 如果没有，则调用queue_work()函数，调度函数gsc3280_spi_pump_messages()。程序如下：
+
+点击(此处)折叠或打开
+
+    /*
+      * when call this function, no msg transfering
+      * deal one msg when call this funciton once.
+      *
+      */
+    static void gsc3280_spi_pump_messages(struct work_struct *work)
+    {
+        unsigned long flags = 0;
+        struct gsc3280_spi *gscs = container_of(work, struct gsc3280_spi, pump_messages);
+
+        DBG("####gsc3280_spi_pump_messages####\n");
+        if (list_empty(&gscs->queue) || (gscs->queue_state == GSC_SPI_QUEUE_STOP)) {
+            if (gscs->queue_state == GSC_SPI_QUEUE_STOP)
+                DBG("!!!!queue is stop!\n");
+            else
+                DBG("msg is finished!\n");
+            gscs->busy = 0;
+            return;
+        }
+        
+        spin_lock_irqsave(&gscs->slock, flags);
+        gscs->cur_msg = list_entry(gscs->queue.next, struct spi_message, queue);
+        if (!gscs->cur_msg) {
+            spin_unlock_irqrestore(&gscs->slock, flags);
+            DBG("!!!!gsc3280_spi_pump_messages: current no msg!\n");
+            return;
+        }
+        list_del_init(&gscs->cur_msg->queue);
+        gscs->cur_msg->state = RUNNING_STATE;
+        gscs->cur_chip = spi_get_ctldata(gscs->cur_msg->spi);
+        gscs->n_bytes = gscs->cur_chip->n_bytes;
+        gscs->busy = 1;
+        spin_unlock_irqrestore(&gscs->slock, flags);
+
+        DBG("cs select enable\n");
+        if (gscs->cur_chip->cs_value == 0) {
+            gpio_set_value(gscs->cur_chip->pin_cs, 0);
+        }
+        else
+            gpio_set_value(gscs->cur_chip->pin_cs, 1);
+        /* get first transfer */
+        gscs->cur_transfer = list_entry(gscs->cur_msg->transfers.next, struct spi_transfer, transfer_list);
+        if (!gscs->cur_transfer) {
+            DBG("!!!!gsc3280_spi_pump_transfers: current no transfer!\n");
+            return;
+        }
+        tasklet_schedule(&gscs->pump_transfers);
+        return;
+    } 
+
+        说明：
+
+        1) 此函数在两种情况下会被调用：
+
+            a) 当第一次开始SPI传输时，会调用此函数，设置message结构体变量。
+
+            b) 当传输完一个message后，如果判断还有message没有被传输，则调用此函数获取新的message。
+
+        2) 程序首先对变量进行检查，有两种退出情况，第一种是队列已经处于停止状态，第二种是传输msg链表为空。
+
+        3) 上锁，获取新的传输message，如果获取失败，直接解锁退出。
+
+        4) 如果获取msg成功，先删除获取成功msg的链表，然后对SPI总线驱动结构体变量赋初值。
+        5) 解锁，使能片选信号CS。
+        6) 获取传输的第一个transfer。
+
+        7) 调度gsc3280_spi_pump_transfers函数，函数如下：
+
+点击(此处)折叠或打开
+
+    /* when call this function,the cur_msg is the new msg */
+    static void gsc3280_spi_pump_transfers(unsigned long data)
+    {
+        int clk_div = 0;
+        u32 imask = 0, cr = 0;
+        unsigned long flags = 0;
+        struct spi_transfer *previous = NULL;
+        struct gsc3280_spi *gscs = (struct gsc3280_spi *)data;
+
+        //DBG("gsc3280_spi_pump_transfers\n");
+        if (gscs->cur_msg->state == ERROR_STATE) {
+            DBG("!!!!pump_transfers:cur msg state error!\n");
+            gscs->cur_msg->status = -EIO;
+            goto early_exit;
+        }
+        /* Handle end of message */
+        if (gscs->cur_msg->state == DONE_STATE) {
+            gscs->cur_msg->status = 0;
+            goto early_exit;
+        }
+        /* Delay if requested at end of transfer*/
+        if (gscs->cur_msg->state == RUNNING_STATE) {
+            previous = list_entry(gscs->cur_transfer->transfer_list.prev, struct spi_transfer, transfer_list);
+            if (previous->delay_usecs)
+                udelay(previous->delay_usecs);
+        }
+
+    #ifdef CONFIG_SPI_GSC3280_DMA
+        gscs->dma_width = gscs->cur_chip->dma_width;
+        gscs->rx_dma = gscs->cur_transfer->rx_dma;
+        gscs->tx_dma = gscs->cur_transfer->tx_dma;
+    #endif
+
+        /* Handle per transfer options for bpw and speed */
+        if (gscs->cur_transfer->speed_hz) {
+            if (gscs->cur_transfer->speed_hz != gscs->cur_chip->speed_hz) {
+                if (gscs->cur_transfer->speed_hz > gscs->max_freq) {
+                    printk(KERN_ERR "SPI1: unsupported freq: %dHz\n", gscs->cur_transfer->speed_hz);
+                    gscs->cur_msg->status = -EIO;
+                    return;
+                } else
+                    gscs->cur_chip->speed_hz = gscs->cur_transfer->speed_hz;
+            }
+        }
+        if (gscs->cur_transfer->bits_per_word) {
+            switch (gscs->cur_transfer->bits_per_word) {
+            case 8:
+            case 16:
+                gscs->n_bytes = gscs->cur_transfer->bits_per_word >> 3;
+    #ifdef CONFIG_SPI_GSC3280_DMA
+                gscs->dma_width = gscs->n_bytes;
+    #endif
+                break;
+            default:
+                printk(KERN_ERR "SPI1: unsupported bits:" "%db\n", gscs->cur_transfer->bits_per_word);
+                gscs->cur_msg->status = -EIO;
+                return;
+            }
+        }
+
+        clk_div = gscs->max_freq / gscs->cur_transfer->speed_hz;
+        clk_div = clk_div / 2 - 1;
+        if (clk_div < 0)
+            clk_div = 0;
+        gscs->cur_chip->clk_div = (u16)clk_div;
+
+        cr = gscs->cur_chip->cr | GSC_SPI_CTL_EN;
+        writel(cr, gscs->regs + GSC_SPI_CTRL);    /* enable spi */
+        writel(gscs->cur_chip->clk_div, gscs->regs + GSC_SPI_SEABAUR);
+        
+        spin_lock_irqsave(&gscs->slock, flags);
+        //gscs->n_bytes = gscs->cur_chip->n_bytes;
+        gscs->tx = (void *)gscs->cur_transfer->tx_buf;
+        gscs->tx_end = gscs->tx + gscs->cur_transfer->len;
+        gscs->rx = gscs->cur_transfer->rx_buf;
+        gscs->rx_end = gscs->rx + gscs->cur_transfer->len;
+        gscs->cs_change = gscs->cur_transfer->cs_change;
+        gscs->len = gscs->cur_transfer->len;
+        spin_unlock_irqrestore(&gscs->slock, flags);
+        
+        imask |= SPI_INT_TX_H_OVER | SPI_INT_RX_L_OVER | SPI_INT_RX_H_OVER | SPI_INT_RX_FULL;
+        if (gscs->tx != NULL) {
+            imask |= SPI_INT_TX_EMPTY;
+        }
+        gsc3280_spi_umask_intr(gscs, imask);
+
+    #ifdef CONFIG_GSC3280_SPI_DMA
+        /* Check if current transfer is a DMA transaction */
+        gscs->dma_mapped = map_dma_buffers(gscs);
+        /* Interrupt mode we only need set the TXEI IRQ, as TX/RX always happen syncronizely */
+        if (!gscs->dma_mapped && !gscs->cur_chip->poll_mode) {
+            //int templen = gscs->len / gscs->n_bytes;
+            //txint_level = gscs->fifo_len / 2;
+            //txint_level = (templen > txint_level) ? txint_level : templen;
+        }
+        if (gscs->dma_mapped)
+            gscs->dma_ops->dma_transfer(gscs, cs_change);
+        if (gscs->cur_chip->poll_mode)
+            gsc3280_spi_poll_transfer(gscs);
+    #endif
+        
+        return;
+        
+    early_exit:
+        gsc3280_spi_giveback(gscs);
+        return;
+    } 
+
+        说明：
+
+        1) 首先对msg变量进行检测。
+
+        2) 如果变量正确，获取此次传输的分频系数和每次传输几个字节。
+        3) 设置SPI控制寄存器和分频寄存器，
+        4) 设置SPI总线驱动结构体中的传输或者接收数据指针，打开中断，开始数据传输。
+
+        5) 每传输一个transfer，都会调用此函数一次。
+
+        实际的传输数据在中断中进行，程序如下：
+
+点击(此处)折叠或打开
+
+    /* this is transfer message function */
+    static irqreturn_t gsc3280_spi_irq(int irq, void *dev_id)
+    {
+        struct gsc3280_spi *gscs = dev_id;
+        u32 irq_status = __raw_readw(gscs->regs + GSC_SPI_ISR);
+        
+        //DBG("gsc3280_spi_irq\n");
+        //DBG("sys_ctl0 = 0x%x\n", readl((volatile unsigned int *)(0xbc04a000 + 0x08)));
+        //DBG("clddiv_spi1 = 0x%x\n", readl((volatile unsigned int *)(0xbc04a000 + 0x38)));
+        //DBG("imux_cfg0 = 0x%x\n", readl((volatile unsigned int *)(0xbc04a000 + 0xb0)));
+        DBG("cr = 0x%x\n", __raw_readw(gscs->regs + GSC_SPI_CTRL));
+        DBG("imsr = 0x%x, irq_status = 0x%x\n", __raw_readl(gscs->regs + GSC_SPI_IMSR), irq_status);
+
+        if (!irq_status ) {
+            DBG("!!!!gsc3280_spi_irq: no irq!\n");
+            return IRQ_NONE;
+        }
+        if (!gscs->cur_msg) {
+            DBG("!!!!gsc3280_spi_irq: no msg!\n");
+            gsc3280_spi_mask_intr(gscs, SPI_INT_TX_EMPTY | SPI_INT_RX_FULL);
+            return IRQ_HANDLED;
+        }
+        if (irq_status & (SPI_INT_TX_H_OVER | SPI_INT_RX_L_OVER | SPI_INT_RX_H_OVER)) {
+            DBG("!!!!gsc3280_spi_irq: fifo overrun/underrun!\n");
+            __raw_writew(0x0e, gscs->regs + GSC_SPI_ISR);
+            gscs->cur_msg->state = ERROR_STATE;
+            gscs->cur_msg->status = -EIO;
+            queue_work(gscs->workqueue, &gscs->pump_messages);
+            return IRQ_HANDLED;
+        }
+        if (irq_status & SPI_INT_RX_FULL) {
+            spi_gsc_read(gscs);
+            return IRQ_HANDLED;
+        }
+        if (irq_status & SPI_INT_TX_EMPTY) {
+            spi_gsc_write(gscs);
+        }
+        return IRQ_HANDLED;
+    } 
+
+        说明：
+
+        1) 首先读取中断状态，如果是空中断，退出中断。
+
+        2) 判断当前是否有msg在传输，如果没有，退出中断。
+
+        3) 判断是否是错误中断，包括溢出等，如果是，屏蔽中断，退出中断。
+        4) 如果是接收满中断，则首先接收数据。然后退出中断。
+
+        4) 如果是发送空中断，则发送数据，发送完成后，退出中断。
+        现在看下发送数据函数spi_gsc_write()：
+
+点击(此处)折叠或打开
+
+    static void gsc3280_writer(struct gsc3280_spi *gscs)
+    {
+        u16 txw = 0;
+        unsigned long flags = 0;
+        u32 max = gsc3280_spi_tx_max(gscs);
+
+        //DBG("max = %d, gscs->n_bytes = 0x%x", max, gscs->n_bytes);
+        spin_lock_irqsave(&gscs->slock, flags);
+        while (max--) {
+            if (gscs->n_bytes == 1)
+                txw = *(u8 *)(gscs->tx);
+            else
+                txw = *(u16 *)(gscs->tx);
+            DBG("txw = 0x%x\n", txw);
+            writel(txw, gscs->regs + GSC_SPI_DA_S);
+            gscs->tx += gscs->n_bytes;
+        }
+        spin_unlock_irqrestore(&gscs->slock, flags);
+    }
+    static void spi_gsc_write(struct gsc3280_spi *gscs)
+    {
+        //DBG("spi_gsc_write\n");
+        gsc3280_spi_mask_intr(gscs, GSC_SPI_SR_MASK);
+        gsc3280_writer(gscs);
+        if (gscs->tx_end == gscs->tx) {
+            gsc3280_spi_xfer_done(gscs);
+        }
+        else {
+            gsc3280_spi_umask_intr(gscs, GSC_SPI_SR_MASK);
+        }
+    } 
+
+        说明：
+
+        1) 首先屏蔽中断。
+
+        2) 发送数据。
+
+        3) 如果发送完成，执行gsc3280_spi_xfer_done(gscs)函数。
+
+        4) 如果没有完成，打开中断，继续发数据。
+
+        对于gsc3280_spi_xfer_done()函数，如下：
+
+点击(此处)折叠或打开
+
+    static void *gsc3280_spi_next_transfer(struct gsc3280_spi *gscs)
+    {
+        struct spi_message *msg = gscs->cur_msg;
+        struct spi_transfer *trans = gscs->cur_transfer;
+
+        if (trans->transfer_list.next != &msg->transfers) {
+            gscs->cur_transfer = list_entry(trans->transfer_list.next, struct spi_transfer, transfer_list);
+            return RUNNING_STATE;
+        } else
+            return DONE_STATE;
+    }
+    static void gsc3280_spi_xfer_done(struct gsc3280_spi *gscs)
+    {
+        //DBG("gsc3280_spi_xfer_done\n");
+        //DBG("irq_status = 0x%x\n", __raw_readw(gscs->regs + GSC_SPI_ISR));
+        //DBG("imsr = 0x%x\n", __raw_readl(gscs->regs + GSC_SPI_IMSR));
+        /* Update total byte transferred return count actual bytes read */
+        gscs->cur_msg->actual_length += gscs->len;
+        /* Move to next transfer */
+        gscs->cur_msg->state = gsc3280_spi_next_transfer(gscs);
+        if (gscs->cur_msg->state == DONE_STATE) {
+            /* Handle end of message */
+            gscs->cur_msg->status = 0;
+            gsc3280_spi_giveback(gscs);
+        } else {
+            tasklet_schedule(&gscs->pump_transfers);
+        }
+
+    }        说明：
+
+        1) 获取下一个transfer，如果还有，则调度gsc3280_spi_pump_transfers()函数准备开始传输。
+
+        2) 如果没有transfer需要传输，调用函数gsc3280_spi_giveback(gscs)，说明此时已经处理完成了一个msg。
+
+        gsc3280_spi_giveback(gscs)函数如下：
+
+点击(此处)折叠或打开
+
+    /* Caller already set message->status; dma and pio irqs are blocked */
+    static void gsc3280_spi_giveback(struct gsc3280_spi *gscs)
+    {
+        unsigned long flags = 0;
+
+        DBG("gsc3280_spi_giveback\n");
+        //DBG("irq_status = 0x%x\n", readl(gscs->regs + GSC_SPI_ISR));
+        gsc3280_spi_mask_intr(gscs, GSC_SPI_SR_MASK);
+        DBG("cs select disable\n");
+        if (gscs->cur_chip->cs_value == 0) {
+            gpio_set_value(gscs->cur_chip->pin_cs, 1);
+        }
+        else
+            gpio_set_value(gscs->cur_chip->pin_cs, 0);
+        gscs->cur_msg->state = NULL;
+        if (gscs->cur_msg->complete)
+            gscs->cur_msg->complete(gscs->cur_msg->context);
+        
+        spin_lock_irqsave(&gscs->slock, flags);
+        gscs->cur_msg = NULL;
+        gscs->cur_transfer = NULL;
+        gscs->prev_chip = gscs->cur_chip;
+        gscs->cur_chip = NULL;
+        gscs->busy = 0;
+    #ifdef CONFIG_SPI_GSC3280_DMA
+        gscs->dma_mapped = 0;
+    #endif
+        spin_unlock_irqrestore(&gscs->slock, flags);
+        queue_work(gscs->workqueue, &gscs->pump_messages);
+    } 
+
+        说明：
+
+        1) 首先屏蔽中断。
+
+        2) 禁止片选。
+
+        3) 设置完成msg。
+
+        4) 上锁，初始化SPI总线结构体变量。
+
+        5) 调用gsc3280_spi_pump_messages()函数，处理下一个msg。
+
+        中断接收数据函数spi_gsc_read(gscs)如下：
+
+点击(此处)折叠或打开
+
+    static void gsc3280_reader(struct gsc3280_spi *gscs)
+    {
+        u16 rxw = 0;
+        unsigned long flags = 0;
+        u32 max = gsc3280_spi_rx_max(gscs);
+
+        //DBG("max = %d, gscs->n_bytes = 0x%x", max, gscs->n_bytes);
+        spin_lock_irqsave(&gscs->slock, flags);
+        while (max--) {
+            rxw = readl(gscs->regs + GSC_SPI_DA_S);
+            DBG("rxw = 0x%x\n", rxw);
+            if (gscs->n_bytes == 1)
+                *(u8 *)(gscs->rx) = (u8)rxw;
+            else
+                *(u16 *)(gscs->rx) = rxw;
+            gscs->rx += gscs->n_bytes;
+        }
+        spin_unlock_irqrestore(&gscs->slock, flags);
+    }
+    static void spi_gsc_read(struct gsc3280_spi *gscs)
+    {
+        //DBG("spi_gsc_read\n");
+        gsc3280_reader(gscs);
+        if (gscs->rx_end == gscs->rx) {
+            gsc3280_spi_xfer_done(gscs);
+        }
+    } 
+
+        说明：
+
+        1) 首先接收数据，如果接收成功，调用gsc3280_spi_xfer_done(gscs);。
+
+        到此，SPI总线驱动就全部讲述完成了，在总线驱动中，使用了queue和tasklet两种机制，queue实现了不同
+msg的传输，tasklet实现了msg中不同transfer的传输。
+

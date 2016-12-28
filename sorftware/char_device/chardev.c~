@@ -199,7 +199,7 @@ static int chardev_init(void)
 							//主设备号是内核资源,这里完成设备驱动在内核上的登记,
 							//至此cat /proc/devices已经可以查看到设备信息.
 
-	cdev_add(&chardev, devno, 2);		//把主设备号和次设备个数初始化到cdev里,
+	cdev_add(&chardev, devno, 2);		//把主设备号和次设备个数填写到cdev里,并把设备描述结构关联到设备号上完成挂载设备驱动到linux上
 						//至此完成cdev加载到linux的初始化操作. 
 						//然而只挂载好了驱动,并没有自动创建逻辑设备文件映射,需要另外人工创建,
 						//例 mknod /dev/chardevX XX XX 
